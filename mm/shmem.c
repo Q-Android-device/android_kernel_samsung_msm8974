@@ -68,6 +68,7 @@ static struct vfsmount *shm_mnt;
 #include <linux/fcntl.h>
 #include <uapi/linux/memfd.h>
 #include <linux/fcntl.h>
+#include <linux/memfd.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -2737,7 +2738,6 @@ static int shmem_show_options(struct seq_file *seq, struct dentry *root)
 	return 0;
 }
 
-
 #define MFD_NAME_PREFIX "memfd:"
 #define MFD_NAME_PREFIX_LEN (sizeof(MFD_NAME_PREFIX) - 1)
 #define MFD_NAME_MAX_LEN (NAME_MAX - MFD_NAME_PREFIX_LEN)
@@ -2791,7 +2791,8 @@ SYSCALL_DEFINE2(memfd_create,
 		error = PTR_ERR(file);
 		goto err_fd;
 	}
-	info = SHMEM_I(file_inode(file));
+
+	info = SHMEM_I(file->f_path.dentry->d_inode);
 	file->f_mode |= FMODE_LSEEK | FMODE_PREAD | FMODE_PWRITE;
 	file->f_flags |= O_RDWR | O_LARGEFILE;
 	if (flags & MFD_ALLOW_SEALING)
