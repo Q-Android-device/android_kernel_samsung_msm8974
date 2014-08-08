@@ -12,6 +12,7 @@
 
 struct shmem_inode_info {
 	spinlock_t		lock;
+	unsigned int		seals;		/* shmem seals */
 	unsigned long		flags;
 	unsigned int		seals;		/* shmem seals */
 	unsigned long		alloced;	/* data pages alloced to file */
@@ -81,5 +82,3 @@ static inline long shmem_fcntl(struct file *f, unsigned int c, unsigned long a)
 
 #endif
 
-
-#endif
