@@ -1374,8 +1374,8 @@ static void __ref check_temp(struct work_struct *work)
 
 	do_core_control(temp);
 	do_vdd_restriction();
-	do_psm();
-	do_ocr();
+//	do_psm();
+//	do_ocr();
 	do_freq_control(temp);
 
 reschedule:
