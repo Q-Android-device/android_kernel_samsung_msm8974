@@ -9,10 +9,6 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-
-#define DEBUG 1
-#define VERBOSE_DEBUG 1
-
 #include <linux/battery/sec_battery.h>
 #if defined(CONFIG_SENSORS_QPNP_ADC_VOLTAGE)
 #include <linux/qpnp/qpnp-adc.h>
@@ -108,6 +104,7 @@ static char *pm_batt_supplied_to[] = {
 };
 #endif
 
+
 static enum power_supply_property sec_battery_props[] = {
 	POWER_SUPPLY_PROP_STATUS,
 	POWER_SUPPLY_PROP_CHARGE_TYPE,
@@ -130,10 +127,11 @@ static enum power_supply_property sec_battery_props[] = {
 };
 
 static enum power_supply_property sec_power_props[] = {
-	POWER_SUPPLY_PROP_CHARGE_TYPE,
 	POWER_SUPPLY_PROP_ONLINE,
+#if defined(CONFIG_QPNP_CHARGER)
 	POWER_SUPPLY_PROP_PRESENT,
 	POWER_SUPPLY_PROP_CURRENT_MAX,
+#endif
 };
 
 static enum power_supply_property sec_ps_props[] = {
@@ -411,7 +409,6 @@ static unsigned long calculate_average_adc(
 	return average_adc;
 }
 */
-
 static int sec_bat_get_adc_value(
 		struct sec_battery_info *battery, int channel)
 {
@@ -852,15 +849,18 @@ static bool sec_bat_check_recharge(struct sec_battery_info *battery)
 		goto check_recharge_check_count;
 	}
 
-	if (battery->status == POWER_SUPPLY_STATUS_FULL && battery->charging_mode == SEC_BATTERY_CHARGING_NONE) {
+	if (battery->status == POWER_SUPPLY_STATUS_FULL &&
+			battery->charging_mode == SEC_BATTERY_CHARGING_NONE) {
 		int recharging_voltage = battery->pdata->recharge_condition_vcell;
 		if (battery->current_event & SEC_BAT_CURRENT_EVENT_LOW_TEMP) {
 			recharging_voltage = battery->pdata->chg_float_voltage - 150; // float voltage - 150mV
 			dev_info(battery->dev, "%s: recharging voltage changed by low temp(%d)\n",
 					__func__, recharging_voltage);
 		}
-		if ((battery->pdata->recharge_condition_type & SEC_BATTERY_RECHARGE_CONDITION_SOC) &&
-				(battery->capacity <= battery->pdata->recharge_condition_soc)) {
+		if ((battery->pdata->recharge_condition_type &
+					SEC_BATTERY_RECHARGE_CONDITION_SOC) &&
+				(battery->capacity <=
+				 battery->pdata->recharge_condition_soc)) {
 			battery->expired_time = battery->pdata->recharging_expired_time;
 			battery->prev_safety_time = 0;
 			dev_info(battery->dev,
@@ -869,7 +869,8 @@ static bool sec_bat_check_recharge(struct sec_battery_info *battery)
 			goto check_recharge_check_count;
 		}
 
-		if ((battery->pdata->recharge_condition_type & SEC_BATTERY_RECHARGE_CONDITION_AVGVCELL) &&
+		if ((battery->pdata->recharge_condition_type &
+					SEC_BATTERY_RECHARGE_CONDITION_AVGVCELL) &&
 				(battery->voltage_avg <= recharging_voltage)) {
 			battery->expired_time = battery->pdata->recharging_expired_time;
 			battery->prev_safety_time = 0;
@@ -2268,7 +2269,7 @@ static void sec_bat_get_battery_info(
 		"%s:Vnow(%dmV),Inow(%dmA),Imax(%dmA),SOC(%d%%),Tbat(%d),is_hc_usb(%d)\n",
 		__func__,
 		battery->voltage_now, battery->current_now,
-		battery->current_max/1000 /*convert to mA*/, battery->capacity,
+		battery->current_max, battery->capacity,
 		battery->temperature, battery->is_hc_usb);
 	dev_dbg(battery->dev,
 		"%s,Vavg(%dmV),Vocv(%dmV),Tamb(%d),"
@@ -2454,11 +2455,9 @@ static void sec_bat_set_polling(
 	case SEC_BATTERY_MONITOR_WORKQUEUE:
 		if (battery->pdata->monitor_initial_count) {
 			battery->pdata->monitor_initial_count--;
-			queue_delayed_work(system_power_efficient_wq,
-				&battery->polling_work, HZ);
+			schedule_delayed_work(&battery->polling_work, HZ);
 		} else
-			queue_delayed_work(system_power_efficient_wq,
-				&battery->polling_work,
+			schedule_delayed_work(&battery->polling_work,
 				polling_time_temp * HZ);
 		break;
 	case SEC_BATTERY_MONITOR_ALARM:
@@ -2484,9 +2483,12 @@ static void sec_bat_swelling_fullcharged_check(struct sec_battery_info *battery)
 
 	switch (battery->pdata->full_check_type) {
 	case SEC_BATTERY_FULLCHARGED_FG_CURRENT:
-		if ((battery->current_now > 0 &&
-				battery->current_now < battery->pdata->charging_current[battery->cable_type].full_check_current_1st) &&
-				(battery->current_avg > 0 && battery->current_avg < battery->pdata->charging_current[battery->cable_type].full_check_current_1st)) {
+		if ((battery->current_now > 0 && battery->current_now <
+				battery->pdata->charging_current[
+				battery->cable_type].full_check_current_1st) &&
+				(battery->current_avg > 0 && battery->current_avg <
+				battery->pdata->charging_current[
+				battery->cable_type].full_check_current_1st)) {
 				value.intval = POWER_SUPPLY_STATUS_FULL;
 		}
 		break;
@@ -2983,7 +2985,7 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 				POWER_SUPPLY_PROP_CURRENT_NOW, value);
 
 			i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
-				value.intval * 1000);//Convert to ua from ma
+				value.intval);
 		}
 		break;
 	case BATT_CURRENT_UA_AVG:
@@ -2995,7 +2997,7 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 				POWER_SUPPLY_PROP_CURRENT_AVG, value);
 
 			i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
-				value.intval * 1000);//Convert to ua from ma
+				value.intval);
 		}
 		break;
 
@@ -4028,9 +4030,6 @@ static int sec_bat_get_property(struct power_supply *psy,
 		/* voltage value should be in uV */
 		val->intval = battery->voltage_avg * 1000;
 		break;
-	case POWER_SUPPLY_PROP_CURRENT_MAX:
-		val->intval = battery->current_max;
-		break;
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
 		val->intval = battery->current_now;
 		break;
@@ -4093,8 +4092,9 @@ static int sec_usb_get_property(struct power_supply *psy,
 {
 	struct sec_battery_info *battery =
 		container_of(psy, struct sec_battery_info, psy_usb);
+#if defined(CONFIG_QPNP_CHARGER)
 	union power_supply_propval value;
-
+#endif
 	switch (psp) {
 	case POWER_SUPPLY_PROP_ONLINE:
 		if ((battery->health == POWER_SUPPLY_HEALTH_OVERVOLTAGE) ||
@@ -4122,23 +4122,16 @@ static int sec_usb_get_property(struct power_supply *psy,
 		if (battery->slate_mode)
 			val->intval = 0;
 		break;
+#if defined(CONFIG_QPNP_CHARGER)
 	case POWER_SUPPLY_PROP_PRESENT:
 		val->intval = battery->cable_type == POWER_SUPPLY_TYPE_BATTERY ? 0 : 1;
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
 		psy_do_property(battery->pdata->charger_name, get,
 				POWER_SUPPLY_PROP_CURRENT_MAX, value);
-#if defined(CONFIG_QPNP_CHARGER)
 		val->intval = value.intval * 1000;
-#else
-		val->intval = value.intval;
+		break;
 #endif
-		break;
-	case POWER_SUPPLY_PROP_CHARGE_TYPE:
-		psy_do_property(battery->pdata->charger_name, get,
-				POWER_SUPPLY_PROP_CHARGE_TYPE, value);
-		val->intval = value.intval;
-		break;
 	default:
 		return -EINVAL;
 	}
@@ -4151,63 +4144,44 @@ static int sec_ac_get_property(struct power_supply *psy,
 {
 	struct sec_battery_info *battery =
 		container_of(psy, struct sec_battery_info, psy_ac);
-	union power_supply_propval value;
 
-	switch (psp) {
-	case POWER_SUPPLY_PROP_ONLINE:
-		if ((battery->health == POWER_SUPPLY_HEALTH_OVERVOLTAGE) ||
+	if (psp != POWER_SUPPLY_PROP_ONLINE)
+		return -EINVAL;
+
+	if ((battery->health == POWER_SUPPLY_HEALTH_OVERVOLTAGE) ||
 		(battery->health == POWER_SUPPLY_HEALTH_UNDERVOLTAGE)) {
 			val->intval = 0;
 			return 0;
-		}
-		/* Set enable=1 only if the AC charger is connected */
-		switch (battery->cable_type) {
-		case POWER_SUPPLY_TYPE_MAINS:
-		case POWER_SUPPLY_TYPE_MISC:
-		case POWER_SUPPLY_TYPE_CARDOCK:
-		case POWER_SUPPLY_TYPE_UARTOFF:
-		case POWER_SUPPLY_TYPE_LAN_HUB:
-		case POWER_SUPPLY_TYPE_UNKNOWN:
-		case POWER_SUPPLY_TYPE_MHL_500:
-		case POWER_SUPPLY_TYPE_MHL_900:
-		case POWER_SUPPLY_TYPE_MHL_1500:
-		case POWER_SUPPLY_TYPE_MHL_2000:
-		case POWER_SUPPLY_TYPE_SMART_OTG:
-		case POWER_SUPPLY_TYPE_SMART_NOTG:
-		case POWER_SUPPLY_TYPE_HV_PREPARE_MAINS:
-		case POWER_SUPPLY_TYPE_HV_ERR:
-		case POWER_SUPPLY_TYPE_HV_UNKNOWN:
-		case POWER_SUPPLY_TYPE_HV_MAINS:
-	#if defined(CONFIG_MUIC_SUPPORT_MULTIMEDIA_DOCK)
-		case POWER_SUPPLY_TYPE_MDOCK_TA:
-	#endif
-			val->intval = 1;
-			break;
-		default:
-			val->intval = 0;
-			break;
-		}
-		break;
-	case POWER_SUPPLY_PROP_PRESENT:
-		val->intval = battery->cable_type == POWER_SUPPLY_TYPE_BATTERY ? 0 : 1;
-		break;
-	case POWER_SUPPLY_PROP_CURRENT_MAX:
-		psy_do_property(battery->pdata->charger_name, get,
-				POWER_SUPPLY_PROP_CURRENT_MAX, value);
-#if defined(CONFIG_QPNP_CHARGER)
-		val->intval = value.intval * 1000;
-#else
-		val->intval = value.intval;
+	}
+
+	/* Set enable=1 only if the AC charger is connected */
+	switch (battery->cable_type) {
+	case POWER_SUPPLY_TYPE_MAINS:
+	case POWER_SUPPLY_TYPE_MISC:
+	case POWER_SUPPLY_TYPE_CARDOCK:
+	case POWER_SUPPLY_TYPE_UARTOFF:
+	case POWER_SUPPLY_TYPE_LAN_HUB:
+	case POWER_SUPPLY_TYPE_UNKNOWN:
+	case POWER_SUPPLY_TYPE_MHL_500:
+	case POWER_SUPPLY_TYPE_MHL_900:
+	case POWER_SUPPLY_TYPE_MHL_1500:
+	case POWER_SUPPLY_TYPE_MHL_2000:
+	case POWER_SUPPLY_TYPE_SMART_OTG:
+	case POWER_SUPPLY_TYPE_SMART_NOTG:
+	case POWER_SUPPLY_TYPE_HV_PREPARE_MAINS:
+	case POWER_SUPPLY_TYPE_HV_ERR:
+	case POWER_SUPPLY_TYPE_HV_UNKNOWN:
+	case POWER_SUPPLY_TYPE_HV_MAINS:
+#if defined(CONFIG_MUIC_SUPPORT_MULTIMEDIA_DOCK)
+	case POWER_SUPPLY_TYPE_MDOCK_TA:
 #endif
-		break;
-	case POWER_SUPPLY_PROP_CHARGE_TYPE:
-		psy_do_property(battery->pdata->charger_name, get,
-				POWER_SUPPLY_PROP_CHARGE_TYPE, value);
-		val->intval = value.intval;
+		val->intval = 1;
 		break;
 	default:
-		return -EINVAL;
+		val->intval = 0;
+		break;
 	}
+
 	return 0;
 }
 

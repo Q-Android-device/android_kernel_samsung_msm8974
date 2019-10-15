@@ -335,7 +335,7 @@ EXPORT_SYMBOL(cpu_down);
 #endif /*CONFIG_HOTPLUG_CPU*/
 
 /* Requires cpu_add_remove_lock to be held */
-static int _cpu_up(unsigned int cpu, int tasks_frozen)
+static int __cpuinit _cpu_up(unsigned int cpu, int tasks_frozen)
 {
 	int ret, nr_calls = 0;
 	void *hcpu = (void *)(long)cpu;
@@ -371,7 +371,7 @@ out_notify:
 	return ret;
 }
 
-int cpu_up(unsigned int cpu)
+int __cpuinit cpu_up(unsigned int cpu)
 {
 	int err = 0;
 
@@ -576,7 +576,7 @@ core_initcall(cpu_hotplug_pm_sync_init);
  * It must be called by the arch code on the new cpu, before the new cpu
  * enables interrupts and before the "boot" cpu returns from __cpu_up().
  */
-void notify_cpu_starting(unsigned int cpu)
+void __cpuinit notify_cpu_starting(unsigned int cpu)
 {
 	unsigned long val = CPU_STARTING;
 
@@ -620,15 +620,11 @@ EXPORT_SYMBOL(cpu_all_bits);
 #ifdef CONFIG_INIT_ALL_POSSIBLE
 static DECLARE_BITMAP(cpu_possible_bits, CONFIG_NR_CPUS) __read_mostly
 	= CPU_BITS_ALL;
-int nr_possible_cpus __read_mostly = NR_CPUS;
 #else
 static DECLARE_BITMAP(cpu_possible_bits, CONFIG_NR_CPUS) __read_mostly;
-int nr_possible_cpus __read_mostly;
 #endif
 const struct cpumask *const cpu_possible_mask = to_cpumask(cpu_possible_bits);
 EXPORT_SYMBOL(cpu_possible_mask);
-
-EXPORT_SYMBOL(nr_possible_cpus);
 
 static DECLARE_BITMAP(cpu_online_bits, CONFIG_NR_CPUS) __read_mostly;
 const struct cpumask *const cpu_online_mask = to_cpumask(cpu_online_bits);
@@ -642,21 +638,12 @@ static DECLARE_BITMAP(cpu_active_bits, CONFIG_NR_CPUS) __read_mostly;
 const struct cpumask *const cpu_active_mask = to_cpumask(cpu_active_bits);
 EXPORT_SYMBOL(cpu_active_mask);
 
-#ifdef CONFIG_HOTPLUG_CPU
-int nr_online_cpus;
-#else
-int nr_online_cpus __read_mostly;
-#endif
-EXPORT_SYMBOL(nr_online_cpus);
-
 void set_cpu_possible(unsigned int cpu, bool possible)
 {
 	if (possible)
 		cpumask_set_cpu(cpu, to_cpumask(cpu_possible_bits));
 	else
 		cpumask_clear_cpu(cpu, to_cpumask(cpu_possible_bits));
-
-	nr_possible_cpus = cpumask_weight(cpu_possible_mask);
 }
 
 void set_cpu_present(unsigned int cpu, bool present)
@@ -675,7 +662,6 @@ void set_cpu_online(unsigned int cpu, bool online)
 	} else {
 		cpumask_clear_cpu(cpu, to_cpumask(cpu_online_bits));
 	}
-	nr_online_cpus = cpumask_weight(cpu_online_mask);
 }
 
 void set_cpu_active(unsigned int cpu, bool active)
@@ -689,7 +675,6 @@ void set_cpu_active(unsigned int cpu, bool active)
 void init_cpu_present(const struct cpumask *src)
 {
 	cpumask_copy(to_cpumask(cpu_present_bits), src);
-	nr_possible_cpus = cpumask_weight(cpu_possible_mask);
 }
 
 void init_cpu_possible(const struct cpumask *src)
@@ -700,7 +685,6 @@ void init_cpu_possible(const struct cpumask *src)
 void init_cpu_online(const struct cpumask *src)
 {
 	cpumask_copy(to_cpumask(cpu_online_bits), src);
-	nr_online_cpus = cpumask_weight(cpu_online_mask);
 }
 
 static ATOMIC_NOTIFIER_HEAD(idle_notifier);

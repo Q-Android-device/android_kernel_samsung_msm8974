@@ -151,7 +151,6 @@ source "drivers/devfreq/Kconfig"
 source "drivers/coresight/Kconfig"
 
 source "drivers/bif/Kconfig"
-
 source "drivers/battery/Kconfig"
 
 source "drivers/sensors/Kconfig"

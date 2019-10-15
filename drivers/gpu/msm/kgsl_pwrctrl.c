@@ -91,12 +91,11 @@ static void update_clk_statistics(struct kgsl_device *device,
 {
 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
 	struct kgsl_clk_stats *clkstats = &pwr->clk_stats;
-	ktime_t elapsed, tmp = ktime_get();
+	ktime_t elapsed;
 	int elapsed_us;
-
 	if (clkstats->start.tv64 == 0)
-		clkstats->start = tmp;
-	clkstats->stop = tmp;
+		clkstats->start = ktime_get();
+	clkstats->stop = ktime_get();
 	elapsed = ktime_sub(clkstats->stop, clkstats->start);
 	elapsed_us = ktime_to_us(elapsed);
 	clkstats->elapsed += elapsed_us;
@@ -104,7 +103,7 @@ static void update_clk_statistics(struct kgsl_device *device,
 		clkstats->clock_time[pwr->active_pwrlevel] += elapsed_us;
 	else
 		clkstats->clock_time[pwr->num_pwrlevels - 1] += elapsed_us;
-	clkstats->start = tmp;
+	clkstats->start = ktime_get();
 }
 
 /*
@@ -1631,6 +1630,7 @@ int kgsl_active_count_get(struct kgsl_device *device)
 		kgsl_mutex_unlock(&device->mutex, &device->mutex_owner);
 		wait_for_completion(&device->hwaccess_gate);
 		kgsl_mutex_lock(&device->mutex, &device->mutex_owner);
+
 		ret = kgsl_pwrctrl_wake(device, 1);
 	}
 	if (ret == 0)
