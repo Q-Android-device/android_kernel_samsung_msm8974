@@ -2302,16 +2302,6 @@ int ext4_ext_index_trans_blocks(struct inode *inode, int nrblocks, int chunk)
 	return index;
 }
 
-static inline int get_default_free_blocks_flags(struct inode *inode)
-{
-	if (S_ISDIR(inode->i_mode) || S_ISLNK(inode->i_mode))
-		return EXT4_FREE_BLOCKS_METADATA | EXT4_FREE_BLOCKS_FORGET;
-	else if (ext4_should_journal_data(inode))
-		return EXT4_FREE_BLOCKS_FORGET;
-	return 0;
-}
-
-
 static int ext4_remove_blocks(handle_t *handle, struct inode *inode,
 			      struct ext4_extent *ex,
 			      ext4_fsblk_t *partial_cluster,
@@ -2320,8 +2310,10 @@ static int ext4_remove_blocks(handle_t *handle, struct inode *inode,
 	struct ext4_sb_info *sbi = EXT4_SB(inode->i_sb);
 	unsigned short ee_len =  ext4_ext_get_actual_len(ex);
 	ext4_fsblk_t pblk;
-	int flags = get_default_free_blocks_flags(inode);
+	int flags = EXT4_FREE_BLOCKS_FORGET;
 
+	if (S_ISDIR(inode->i_mode) || S_ISLNK(inode->i_mode))
+		flags |= EXT4_FREE_BLOCKS_METADATA;
 	/*
 	 * For bigalloc file systems, we never free a partial cluster
 	 * at the beginning of the extent.  Instead, we make a note
@@ -2567,7 +2559,10 @@ ext4_ext_rm_leaf(handle_t *handle, struct inode *inode,
 	if (*partial_cluster && ex >= EXT_FIRST_EXTENT(eh) &&
 	    (EXT4_B2C(sbi, ext4_ext_pblock(ex) + ex_ee_len - 1) !=
 	     *partial_cluster)) {
-	int flags = get_default_free_blocks_flags(inode);
+		int flags = EXT4_FREE_BLOCKS_FORGET;
+
+		if (S_ISDIR(inode->i_mode) || S_ISLNK(inode->i_mode))
+			flags |= EXT4_FREE_BLOCKS_METADATA;
 
 		ext4_free_blocks(handle, inode, NULL,
 				 EXT4_C2B(sbi, *partial_cluster),
@@ -2796,7 +2791,10 @@ cont:
 	 * even the first extent, then we should free the blocks in the partial
 	 * cluster as well. */
 	if (partial_cluster && path->p_hdr->eh_entries == 0) {
-		int flags = get_default_free_blocks_flags(inode);
+		int flags = EXT4_FREE_BLOCKS_FORGET;
+
+		if (S_ISDIR(inode->i_mode) || S_ISLNK(inode->i_mode))
+			flags |= EXT4_FREE_BLOCKS_METADATA;
 
 		ext4_free_blocks(handle, inode, NULL,
 				 EXT4_C2B(EXT4_SB(sb), partial_cluster),
