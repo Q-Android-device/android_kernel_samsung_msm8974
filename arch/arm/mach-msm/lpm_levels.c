@@ -33,7 +33,6 @@
 #include "pm.h"
 #include "rpm-notifier.h"
 #include "spm.h"
-#include "idle.h"
 #include "clock.h"
 
 #include <mach/gpiomux.h>
@@ -113,7 +112,7 @@ static struct notifier_block __refdata lpm_cpu_nblk = {
 };
 
 static uint32_t allowed_l2_mode;
-static uint32_t sysfs_dbg_l2_mode __refdata = MSM_SPM_L2_MODE_POWER_COLLAPSE;
+static uint32_t sysfs_dbg_l2_mode = MSM_SPM_L2_MODE_POWER_COLLAPSE;
 static uint32_t default_l2_mode;
 
 
@@ -137,6 +136,8 @@ module_param_named(
 static int msm_pm_sleep_time_override;
 module_param_named(sleep_time_override,
 	msm_pm_sleep_time_override, int, S_IRUGO | S_IWUSR | S_IWGRP);
+
+static uint64_t suspend_wake_time;
 
 static int msm_pm_sleep_sec_debug;
 module_param_named(secdebug,
@@ -292,7 +293,8 @@ static int lpm_system_mode_select(
 	int i;
 	uint32_t best_level_pwr = ~0U;
 	uint32_t pwr;
-	uint32_t latency_us = pm_qos_request(PM_QOS_CPU_DMA_LATENCY);
+	uint32_t latency_us = pm_qos_request_for_cpu(PM_QOS_CPU_DMA_LATENCY,
+							smp_processor_id());
 
 	if (!system_state->system_level)
 		return -EINVAL;
@@ -394,8 +396,11 @@ static void lpm_system_prepare(struct lpm_system_state *system_state,
 		}
 
 
+		if (!suspend_wake_time)
+			suspend_wake_time =  msm_pm_sleep_time_override;
+
 		if (!from_idle)
-			us = USEC_PER_SEC * msm_pm_sleep_time_override;
+			us = USEC_PER_SEC * suspend_wake_time;
 
 		do_div(us, USEC_PER_SEC/SCLK_HZ);
 		sclk = (uint32_t)us;
@@ -473,6 +478,21 @@ s32 msm_cpuidle_get_deep_idle_latency(void)
 		return level->pwr.latency_us;
 }
 
+void lpm_suspend_wake_time(uint64_t wakeup_time)
+{
+	if (wakeup_time <= 0) {
+		suspend_wake_time = msm_pm_sleep_time_override;
+		return;
+	}
+
+	if (msm_pm_sleep_time_override &&
+		(msm_pm_sleep_time_override < wakeup_time))
+		suspend_wake_time = msm_pm_sleep_time_override;
+	else
+		suspend_wake_time = wakeup_time;
+}
+EXPORT_SYMBOL(lpm_suspend_wake_time);
+
 static int lpm_cpu_callback(struct notifier_block *cpu_nb,
 	unsigned long action, void *hcpu)
 {
@@ -513,7 +533,8 @@ static noinline int lpm_cpu_power_select(struct cpuidle_device *dev, int *index)
 {
 	int best_level = -1;
 	uint32_t best_level_pwr = ~0U;
-	uint32_t latency_us = pm_qos_request(PM_QOS_CPU_DMA_LATENCY);
+	uint32_t latency_us = pm_qos_request_for_cpu(PM_QOS_CPU_DMA_LATENCY,
+							dev->cpu);
 	uint32_t sleep_us =
 		(uint32_t)(ktime_to_us(tick_nohz_get_sleep_length()));
 	uint32_t modified_time_us = 0;
@@ -524,8 +545,7 @@ static noinline int lpm_cpu_power_select(struct cpuidle_device *dev, int *index)
 	if (!sys_state.cpu_level)
 		return -EINVAL;
 
-	if (!dev->cpu)
-		next_event_us = (uint32_t)(ktime_to_us(get_next_event_time()));
+	next_event_us = (uint32_t)(ktime_to_us(get_next_event_time(dev->cpu)));
 
 	for (i = 0; i < sys_state.num_cpu_levels; i++) {
 		struct lpm_cpu_level *level = &sys_state.cpu_level[i];
@@ -586,7 +606,7 @@ static noinline int lpm_cpu_power_select(struct cpuidle_device *dev, int *index)
 		}
 	}
 
-	if (modified_time_us && !dev->cpu)
+	if (modified_time_us)
 		msm_pm_set_timer(modified_time_us);
 
 	return best_level;
@@ -807,7 +827,7 @@ static int lpm_suspend_prepare(void)
 
 	suspend_in_progress = true;
 	msm_mpm_suspend_prepare();
-	regulator_showall_enabled();
+//	regulator_showall_enabled();
 
 /* Temporary fix for RUBEN LTE for configuring GPIO 33 to NC configuration
 before entering sleep as some other process is changing it*/
@@ -1149,7 +1169,7 @@ fail:
 	return -EFAULT;
 }
 
-static struct of_device_id cpu_modes_mtch_tbl[] __initdata = {
+static struct of_device_id cpu_modes_mtch_tbl[] = {
 	{.compatible = "qcom,cpu-modes"},
 	{},
 };
@@ -1163,7 +1183,7 @@ static struct platform_driver cpu_modes_driver = {
 	},
 };
 
-static struct of_device_id system_modes_mtch_tbl[] __initdata = {
+static struct of_device_id system_modes_mtch_tbl[] = {
 	{.compatible = "qcom,system-modes"},
 	{},
 };
@@ -1177,7 +1197,7 @@ static struct platform_driver system_modes_driver = {
 	},
 };
 
-static struct of_device_id lpm_levels_match_table[] __initdata = {
+static struct of_device_id lpm_levels_match_table[] = {
 	{.compatible = "qcom,lpm-levels"},
 	{},
 };
