@@ -18,15 +18,15 @@ extern int poweroff_charging;
 #endif
 
 /* DVFS feature : TOUCH BOOSTER */
-#define TSP_BOOSTER
+//#define TSP_BOOSTER
 #ifdef TSP_BOOSTER
 #include <linux/cpufreq.h>
 
 #define DVFS_STAGE_DUAL		2
 #define DVFS_STAGE_SINGLE		1
 #define DVFS_STAGE_NONE		0
-#define TOUCH_BOOSTER_OFF_TIME	500
-#define TOUCH_BOOSTER_CHG_TIME	500
+#define TOUCH_BOOSTER_OFF_TIME	50
+#define TOUCH_BOOSTER_CHG_TIME	50
 #endif
 
 #include <linux/input.h>

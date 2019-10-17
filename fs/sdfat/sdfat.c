@@ -3268,6 +3268,7 @@ static int sdfat_da_prep_block(struct inode *inode, sector_t iblock,
 
 	} else if (create == 1) {
 		/* Not exist: new cluster needed */
+
 		if (!BLOCK_ADDED(bmap_create)) {
 			sector_t last_block;
 			last_block = (i_size_read(inode) + (sb->s_blocksize - 1))
@@ -3732,10 +3733,12 @@ static int __sdfat_write_begin(struct file *file, struct address_space *mapping,
 	__cancel_dfr_work(mapping->host, pos, (loff_t)(pos + len), fname);
 
 	ret = sdfat_check_writable(sb);
+
 	if (unlikely(ret < 0))
 		return ret;
 
 	*pagep = NULL;
+
 	ret = cont_write_begin(file, mapping, pos, len, flags, pagep, fsdata,
 					get_block, bytes);
 

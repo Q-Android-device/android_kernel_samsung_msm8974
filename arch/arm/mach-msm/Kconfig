@@ -2,6 +2,10 @@ if ARCH_MSM
 
 menu "MSM SoC Type"
 
+config TUNED_PLUG
+	bool "Enable tuned-plug cpu hotplug driver"
+	default y
+
 config ARCH_MSM7X01A
 	bool "MSM7x00A / MSM7x01A"
 	select ARCH_MSM_ARM11
@@ -259,7 +263,7 @@ config ARCH_MSM8974
 	select MULTI_IRQ_HANDLER
 	select MSM_MULTIMEDIA_USE_ION
 	select PM_DEVFREQ
-	select MSM_DEVFREQ_CPUBW
+#	select MSM_DEVFREQ_CPUBW
 	select MSM_PIL
 	select MSM_SPM_V2
 	select MSM_L2_SPM
@@ -597,7 +601,7 @@ config  ARCH_MSM_SCORPION
 config  ARCH_MSM_KRAIT
 	bool
 	select ARM_L1_CACHE_SHIFT_6
-	select DEVFREQ_GOV_MSM_CPUBW_HWMON
+#	select DEVFREQ_GOV_MSM_CPUBW_HWMON
 
 config  MSM_CORTEX_A7
 	bool
@@ -3546,6 +3550,12 @@ config MSM_DEVFREQ_CPUBW
 	  agnostic interface to so that some of the devfreq governors can be
 	  shared across SoCs.
 
+config CPU_VOLTAGE_TABLE
+	bool "Enable CPU Voltage Table via sysfs"
+	default y
+	help
+	  DTS based kernel User Voltage Control
+
 config MSM_AVS_HW
 	bool "Enable Adaptive Voltage Scaling (AVS)"
 	default n
@@ -4921,6 +4931,18 @@ config SEC_SMART_MGR_RUNQUEUE_AVG
 	bool "Samsung added for read current run queue"
 	help
 	  Support for Smart MGR function.
+	  
+config PVS_LEVEL_INTERFACE
+	bool "Expose PVS level information in sys fs (Boeffla-Kernel)"
+	help
+	 Allow PVS level to be shown in Boeffla-Config app
+
+config CHARGE_LEVEL
+	bool "Charge level interface"
+	default y
+	help
+	  Allows configuration of ac, usb and wireless charging levels
+
 endif
 
 config KERNEL_TEXT_MPU_PROT

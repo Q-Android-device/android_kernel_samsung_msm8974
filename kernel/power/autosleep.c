@@ -10,6 +10,7 @@
 #include <linux/mutex.h>
 #include <linux/pm_wakeup.h>
 
+
 #include "power.h"
 
 static suspend_state_t autosleep_state;
