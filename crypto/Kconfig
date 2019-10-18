@@ -2,7 +2,7 @@
 # Generic algorithms support
 #
 config XOR_BLOCKS
-	bool
+	tristate
 
 #
 # async_tx api: hardware offloaded memory transfer/transform support
