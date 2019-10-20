@@ -1023,11 +1023,11 @@ static int oom_adjust_permission(struct inode *inode, int mask)
 	/* Fall back to default. */
 	return generic_permission(inode, mask);
 }
-/*
+
 static const struct inode_operations proc_oom_adjust_inode_operations = {
 	.permission	= oom_adjust_permission,
 };
-*/
+
 static const struct file_operations proc_oom_adjust_operations = {
 	.read		= oom_adjust_read,
 	.write		= oom_adjust_write,

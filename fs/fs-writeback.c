@@ -30,9 +30,9 @@
 #include "internal.h"
 
 /*
- * 4MB minimal write chunk size. 1mb?
+ * 4MB minimal write chunk size
  */
-#define MIN_WRITEBACK_PAGES	(2048UL >> (PAGE_CACHE_SHIFT - 10))
+#define MIN_WRITEBACK_PAGES	(4096UL >> (PAGE_CACHE_SHIFT - 10))
 
 /*
  * Passed into wb_writeback(), essentially a subset of writeback_control
@@ -90,7 +90,7 @@ static inline struct inode *wb_inode(struct list_head *head)
  * wb_writeback_work structure and inline functions so that the definition
  * remains local to this file.
  */
-//#define CREATE_TRACE_POINTS
+#define CREATE_TRACE_POINTS
 #include <trace/events/writeback.h>
 
 /* Wakeup flusher thread or forker thread to fork it. Requires bdi->wb_lock. */
@@ -626,7 +626,7 @@ static long writeback_sb_inodes(struct super_block *sb,
 		 * background threshold and other termination conditions.
 		 */
 		if (wrote) {
-			if (time_is_before_jiffies(start_time + HZ / 30UL))
+			if (time_is_before_jiffies(start_time + HZ / 10UL))
 				break;
 			if (work->nr_pages <= 0)
 				break;
