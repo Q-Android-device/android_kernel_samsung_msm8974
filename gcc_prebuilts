@@ -1,0 +1,4145 @@
+From 68aca4e880b3fba31b0d1e6b342e3b81efd597ff Mon Sep 17 00:00:00 2001
+From: Samuel Pascua <pascua.samuel.14@gmail.com>
+Date: Wed, 9 Oct 2019 17:54:23 +0800
+Subject: [PATCH] asd
+
+---
+ fs/f2fs/segment.c         | 3527 -------------------------------------
+ fs/f2fs/segment.o_shipped |  Bin 0 -> 59284 bytes
+ 2 files changed, 3527 deletions(-)
+ delete mode 100644 fs/f2fs/segment.c
+ create mode 100644 fs/f2fs/segment.o_shipped
+
+diff --git a/fs/f2fs/segment.c b/fs/f2fs/segment.c
+deleted file mode 100644
+index 8ade22ba3a30..000000000000
+--- a/fs/f2fs/segment.c
++++ /dev/null
+@@ -1,3527 +0,0 @@
+-/*
+- * fs/f2fs/segment.c
+- *
+- * Copyright (c) 2012 Samsung Electronics Co., Ltd.
+- *             http://www.samsung.com/
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License version 2 as
+- * published by the Free Software Foundation.
+- */
+-#include <linux/fs.h>
+-#include <linux/f2fs_fs.h>
+-#include <linux/bio.h>
+-#include <linux/blkdev.h>
+-#include <linux/prefetch.h>
+-#include <linux/kthread.h>
+-#include <linux/swap.h>
+-#include <linux/timer.h>
+-
+-#include "f2fs.h"
+-#include "segment.h"
+-#include "node.h"
+-#include "trace.h"
+-#include <trace/events/f2fs.h>
+-
+-#define __reverse_ffz(x) __reverse_ffs(~(x))
+-
+-static struct kmem_cache *discard_entry_slab;
+-static struct kmem_cache *discard_cmd_slab;
+-static struct kmem_cache *sit_entry_set_slab;
+-static struct kmem_cache *inmem_entry_slab;
+-
+-/**
+- * Copied from latest lib/llist.c
+- * llist_for_each_entry_safe - iterate over some deleted entries of
+- *                             lock-less list of given type
+- *			       safe against removal of list entry
+- * @pos:	the type * to use as a loop cursor.
+- * @n:		another type * to use as temporary storage
+- * @node:	the first entry of deleted list entries.
+- * @member:	the name of the llist_node with the struct.
+- *
+- * In general, some entries of the lock-less list can be traversed
+- * safely only after being removed from list, so start with an entry
+- * instead of list head.
+- *
+- * If being used on entries deleted from lock-less list directly, the
+- * traverse order is from the newest to the oldest added entry.  If
+- * you want to traverse from the oldest to the newest, you must
+- * reverse the order by yourself before traversing.
+- */
+-#define llist_for_each_entry_safe(pos, n, node, member)			       \
+-	for (pos = llist_entry((node), typeof(*pos), member);		       \
+-		&pos->member != NULL &&					       \
+-		(n = llist_entry(pos->member.next, typeof(*n), member), true); \
+-		pos = n)
+-
+-/**
+- * Copied from latest lib/llist.c
+- * llist_reverse_order - reverse order of a llist chain
+- * @head:	first item of the list to be reversed
+- *
+- * Reverse the order of a chain of llist entries and return the
+- * new first entry.
+- */
+-struct llist_node *llist_reverse_order(struct llist_node *head)
+-{
+-	struct llist_node *new_head = NULL;
+-
+-	while (head) {
+-		struct llist_node *tmp = head;
+-		head = head->next;
+-		tmp->next = new_head;
+-		new_head = tmp;
+-	}
+-
+-	return new_head;
+-}
+-
+-/**
+- * Copied from latest linux/list.h
+- * list_last_entry - get the last element from a list
+- * @ptr:        the list head to take the element from.
+- * @type:       the type of the struct this is embedded in.
+- * @member:     the name of the list_struct within the struct.
+- *
+- * Note, that list is expected to be not empty.
+- */
+-#define list_last_entry(ptr, type, member) \
+-	list_entry((ptr)->prev, type, member)
+-
+-static unsigned long __reverse_ulong(unsigned char *str)
+-{
+-	unsigned long tmp = 0;
+-	int shift = 24, idx = 0;
+-
+-#if BITS_PER_LONG == 64
+-	shift = 56;
+-#endif
+-	while (shift >= 0) {
+-		tmp |= (unsigned long)str[idx++] << shift;
+-		shift -= BITS_PER_BYTE;
+-	}
+-	return tmp;
+-}
+-
+-/*
+- * __reverse_ffs is copied from include/asm-generic/bitops/__ffs.h since
+- * MSB and LSB are reversed in a byte by f2fs_set_bit.
+- */
+-static inline unsigned long __reverse_ffs(unsigned long word)
+-{
+-	int num = 0;
+-
+-#if BITS_PER_LONG == 64
+-	if ((word & 0xffffffff00000000UL) == 0)
+-		num += 32;
+-	else
+-		word >>= 32;
+-#endif
+-	if ((word & 0xffff0000) == 0)
+-		num += 16;
+-	else
+-		word >>= 16;
+-
+-	if ((word & 0xff00) == 0)
+-		num += 8;
+-	else
+-		word >>= 8;
+-
+-	if ((word & 0xf0) == 0)
+-		num += 4;
+-	else
+-		word >>= 4;
+-
+-	if ((word & 0xc) == 0)
+-		num += 2;
+-	else
+-		word >>= 2;
+-
+-	if ((word & 0x2) == 0)
+-		num += 1;
+-	return num;
+-}
+-
+-/*
+- * __find_rev_next(_zero)_bit is copied from lib/find_next_bit.c because
+- * f2fs_set_bit makes MSB and LSB reversed in a byte.
+- * @size must be integral times of unsigned long.
+- * Example:
+- *                             MSB <--> LSB
+- *   f2fs_set_bit(0, bitmap) => 1000 0000
+- *   f2fs_set_bit(7, bitmap) => 0000 0001
+- */
+-static unsigned long __find_rev_next_bit(const unsigned long *addr,
+-			unsigned long size, unsigned long offset)
+-{
+-	const unsigned long *p = addr + BIT_WORD(offset);
+-	unsigned long result = size;
+-	unsigned long tmp;
+-
+-	if (offset >= size)
+-		return size;
+-
+-	size -= (offset & ~(BITS_PER_LONG - 1));
+-	offset %= BITS_PER_LONG;
+-
+-	while (1) {
+-		if (*p == 0)
+-			goto pass;
+-
+-		tmp = __reverse_ulong((unsigned char *)p);
+-
+-		tmp &= ~0UL >> offset;
+-		if (size < BITS_PER_LONG)
+-			tmp &= (~0UL << (BITS_PER_LONG - size));
+-		if (tmp)
+-			goto found;
+-pass:
+-		if (size <= BITS_PER_LONG)
+-			break;
+-		size -= BITS_PER_LONG;
+-		offset = 0;
+-		p++;
+-	}
+-	return result;
+-found:
+-	return result - size + __reverse_ffs(tmp);
+-}
+-
+-static unsigned long __find_rev_next_zero_bit(const unsigned long *addr,
+-			unsigned long size, unsigned long offset)
+-{
+-	const unsigned long *p = addr + BIT_WORD(offset);
+-	unsigned long result = size;
+-	unsigned long tmp;
+-
+-	if (offset >= size)
+-		return size;
+-
+-	size -= (offset & ~(BITS_PER_LONG - 1));
+-	offset %= BITS_PER_LONG;
+-
+-	while (1) {
+-		if (*p == ~0UL)
+-			goto pass;
+-
+-		tmp = __reverse_ulong((unsigned char *)p);
+-
+-		if (offset)
+-			tmp |= ~0UL << (BITS_PER_LONG - offset);
+-		if (size < BITS_PER_LONG)
+-			tmp |= ~0UL >> size;
+-		if (tmp != ~0UL)
+-			goto found;
+-pass:
+-		if (size <= BITS_PER_LONG)
+-			break;
+-		size -= BITS_PER_LONG;
+-		offset = 0;
+-		p++;
+-	}
+-	return result;
+-found:
+-	return result - size + __reverse_ffz(tmp);
+-}
+-
+-void register_inmem_page(struct inode *inode, struct page *page)
+-{
+-	struct f2fs_inode_info *fi = F2FS_I(inode);
+-	struct inmem_pages *new;
+-
+-	f2fs_trace_pid(page);
+-
+-	set_page_private(page, (unsigned long)ATOMIC_WRITTEN_PAGE);
+-	SetPagePrivate(page);
+-
+-	new = f2fs_kmem_cache_alloc(inmem_entry_slab, GFP_NOFS);
+-
+-	/* add atomic page indices to the list */
+-	new->page = page;
+-	INIT_LIST_HEAD(&new->list);
+-
+-	/* increase reference count with clean state */
+-	mutex_lock(&fi->inmem_lock);
+-	get_page(page);
+-	list_add_tail(&new->list, &fi->inmem_pages);
+-	inc_page_count(F2FS_I_SB(inode), F2FS_INMEM_PAGES);
+-	mutex_unlock(&fi->inmem_lock);
+-
+-	trace_f2fs_register_inmem_page(page, INMEM);
+-}
+-
+-static int __revoke_inmem_pages(struct inode *inode,
+-				struct list_head *head, bool drop, bool recover)
+-{
+-	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
+-	struct inmem_pages *cur, *tmp;
+-	int err = 0;
+-
+-	list_for_each_entry_safe(cur, tmp, head, list) {
+-		struct page *page = cur->page;
+-
+-		if (drop)
+-			trace_f2fs_commit_inmem_page(page, INMEM_DROP);
+-
+-		lock_page(page);
+-
+-		if (recover) {
+-			struct dnode_of_data dn;
+-			struct node_info ni;
+-
+-			trace_f2fs_commit_inmem_page(page, INMEM_REVOKE);
+-
+-			set_new_dnode(&dn, inode, NULL, NULL, 0);
+-			if (get_dnode_of_data(&dn, page->index, LOOKUP_NODE)) {
+-				err = -EAGAIN;
+-				goto next;
+-			}
+-			get_node_info(sbi, dn.nid, &ni);
+-			f2fs_replace_block(sbi, &dn, dn.data_blkaddr,
+-					cur->old_addr, ni.version, true, true);
+-			f2fs_put_dnode(&dn);
+-		}
+-next:
+-		/* we don't need to invalidate this in the sccessful status */
+-		if (drop || recover)
+-			ClearPageUptodate(page);
+-		set_page_private(page, 0);
+-		ClearPagePrivate(page);
+-		f2fs_put_page(page, 1);
+-
+-		list_del(&cur->list);
+-		kmem_cache_free(inmem_entry_slab, cur);
+-		dec_page_count(F2FS_I_SB(inode), F2FS_INMEM_PAGES);
+-	}
+-	return err;
+-}
+-
+-void drop_inmem_pages(struct inode *inode)
+-{
+-	struct f2fs_inode_info *fi = F2FS_I(inode);
+-
+-	mutex_lock(&fi->inmem_lock);
+-	__revoke_inmem_pages(inode, &fi->inmem_pages, true, false);
+-	mutex_unlock(&fi->inmem_lock);
+-
+-	clear_inode_flag(inode, FI_ATOMIC_FILE);
+-	stat_dec_atomic_write(inode);
+-}
+-
+-void drop_inmem_page(struct inode *inode, struct page *page)
+-{
+-	struct f2fs_inode_info *fi = F2FS_I(inode);
+-	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
+-	struct list_head *head = &fi->inmem_pages;
+-	struct inmem_pages *cur = NULL;
+-
+-	f2fs_bug_on(sbi, !IS_ATOMIC_WRITTEN_PAGE(page));
+-
+-	mutex_lock(&fi->inmem_lock);
+-	list_for_each_entry(cur, head, list) {
+-		if (cur->page == page)
+-			break;
+-	}
+-
+-	f2fs_bug_on(sbi, !cur || cur->page != page);
+-	list_del(&cur->list);
+-	mutex_unlock(&fi->inmem_lock);
+-
+-	dec_page_count(sbi, F2FS_INMEM_PAGES);
+-	kmem_cache_free(inmem_entry_slab, cur);
+-
+-	ClearPageUptodate(page);
+-	set_page_private(page, 0);
+-	ClearPagePrivate(page);
+-	f2fs_put_page(page, 0);
+-
+-	trace_f2fs_commit_inmem_page(page, INMEM_INVALIDATE);
+-}
+-
+-static int __commit_inmem_pages(struct inode *inode,
+-					struct list_head *revoke_list)
+-{
+-	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
+-	struct f2fs_inode_info *fi = F2FS_I(inode);
+-	struct inmem_pages *cur, *tmp;
+-	struct f2fs_io_info fio = {
+-		.sbi = sbi,
+-		.type = DATA,
+-		.op = REQ_OP_WRITE,
+-		.op_flags = REQ_SYNC | REQ_PRIO,
+-	};
+-	pgoff_t last_idx = ULONG_MAX;
+-	int err = 0;
+-
+-	list_for_each_entry_safe(cur, tmp, &fi->inmem_pages, list) {
+-		struct page *page = cur->page;
+-
+-		lock_page(page);
+-		if (page->mapping == inode->i_mapping) {
+-			trace_f2fs_commit_inmem_page(page, INMEM);
+-
+-			set_page_dirty(page);
+-			f2fs_wait_on_page_writeback(page, DATA, true);
+-			if (clear_page_dirty_for_io(page)) {
+-				inode_dec_dirty_pages(inode);
+-				remove_dirty_inode(inode);
+-			}
+-
+-			fio.page = page;
+-			fio.old_blkaddr = NULL_ADDR;
+-			fio.encrypted_page = NULL;
+-			fio.need_lock = false,
+-			err = do_write_data_page(&fio);
+-			if (err) {
+-				unlock_page(page);
+-				break;
+-			}
+-
+-			/* record old blkaddr for revoking */
+-			cur->old_addr = fio.old_blkaddr;
+-			last_idx = page->index;
+-		}
+-		unlock_page(page);
+-		list_move_tail(&cur->list, revoke_list);
+-	}
+-
+-	if (last_idx != ULONG_MAX)
+-		f2fs_submit_merged_bio_cond(sbi, inode, 0, last_idx,
+-							DATA, WRITE);
+-
+-	if (!err)
+-		__revoke_inmem_pages(inode, revoke_list, false, false);
+-
+-	return err;
+-}
+-
+-int commit_inmem_pages(struct inode *inode)
+-{
+-	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
+-	struct f2fs_inode_info *fi = F2FS_I(inode);
+-	struct list_head revoke_list;
+-	int err;
+-
+-	INIT_LIST_HEAD(&revoke_list);
+-	f2fs_balance_fs(sbi, true);
+-	f2fs_lock_op(sbi);
+-
+-	set_inode_flag(inode, FI_ATOMIC_COMMIT);
+-
+-	mutex_lock(&fi->inmem_lock);
+-	err = __commit_inmem_pages(inode, &revoke_list);
+-	if (err) {
+-		int ret;
+-		/*
+-		 * try to revoke all committed pages, but still we could fail
+-		 * due to no memory or other reason, if that happened, EAGAIN
+-		 * will be returned, which means in such case, transaction is
+-		 * already not integrity, caller should use journal to do the
+-		 * recovery or rewrite & commit last transaction. For other
+-		 * error number, revoking was done by filesystem itself.
+-		 */
+-		ret = __revoke_inmem_pages(inode, &revoke_list, false, true);
+-		if (ret)
+-			err = ret;
+-
+-		/* drop all uncommitted pages */
+-		__revoke_inmem_pages(inode, &fi->inmem_pages, true, false);
+-	}
+-	mutex_unlock(&fi->inmem_lock);
+-
+-	clear_inode_flag(inode, FI_ATOMIC_COMMIT);
+-
+-	f2fs_unlock_op(sbi);
+-	return err;
+-}
+-
+-/*
+- * This function balances dirty node and dentry pages.
+- * In addition, it controls garbage collection.
+- */
+-void f2fs_balance_fs(struct f2fs_sb_info *sbi, bool need)
+-{
+-#ifdef CONFIG_F2FS_FAULT_INJECTION
+-	if (time_to_inject(sbi, FAULT_CHECKPOINT)) {
+-		f2fs_show_injection_info(FAULT_CHECKPOINT);
+-		f2fs_stop_checkpoint(sbi, false);
+-	}
+-#endif
+-
+-	/* balance_fs_bg is able to be pending */
+-	if (need && excess_cached_nats(sbi))
+-		f2fs_balance_fs_bg(sbi);
+-
+-	/*
+-	 * We should do GC or end up with checkpoint, if there are so many dirty
+-	 * dir/node pages without enough free segments.
+-	 */
+-	if (has_not_enough_free_secs(sbi, 0, 0)) {
+-		mutex_lock(&sbi->gc_mutex);
+-		f2fs_gc(sbi, false, false, NULL_SEGNO);
+-	}
+-}
+-
+-void f2fs_balance_fs_bg(struct f2fs_sb_info *sbi)
+-{
+-	/* try to shrink extent cache when there is no enough memory */
+-	if (!available_free_memory(sbi, EXTENT_CACHE))
+-		f2fs_shrink_extent_tree(sbi, EXTENT_CACHE_SHRINK_NUMBER);
+-
+-	/* check the # of cached NAT entries */
+-	if (!available_free_memory(sbi, NAT_ENTRIES))
+-		try_to_free_nats(sbi, NAT_ENTRY_PER_BLOCK);
+-
+-	if (!available_free_memory(sbi, FREE_NIDS))
+-		try_to_free_nids(sbi, MAX_FREE_NIDS);
+-	else
+-		build_free_nids(sbi, false, false);
+-
+-	if (!is_idle(sbi) && !excess_dirty_nats(sbi))
+-		return;
+-
+-	/* checkpoint is the only way to shrink partial cached entries */
+-	if (!available_free_memory(sbi, NAT_ENTRIES) ||
+-			!available_free_memory(sbi, INO_ENTRIES) ||
+-			excess_prefree_segs(sbi) ||
+-			excess_dirty_nats(sbi) ||
+-			f2fs_time_over(sbi, CP_TIME)) {
+-		if (test_opt(sbi, DATA_FLUSH)) {
+-			struct blk_plug plug;
+-
+-			blk_start_plug(&plug);
+-			sync_dirty_inodes(sbi, FILE_INODE);
+-			blk_finish_plug(&plug);
+-		}
+-		f2fs_sync_fs(sbi->sb, true);
+-		stat_inc_bg_cp_count(sbi->stat_info);
+-	}
+-}
+-
+-static int __submit_flush_wait(struct f2fs_sb_info *sbi,
+-				struct block_device *bdev)
+-{
+-	struct bio *bio = f2fs_bio_alloc(0);
+-	int ret;
+-
+-	bio->bi_rw = REQ_OP_WRITE;
+-	bio->bi_bdev = bdev;
+-	ret = submit_bio_wait(WRITE_FLUSH, bio);
+-	bio_put(bio);
+-
+-	trace_f2fs_issue_flush(bdev, test_opt(sbi, NOBARRIER),
+-				test_opt(sbi, FLUSH_MERGE), ret);
+-	return ret;
+-}
+-
+-static int submit_flush_wait(struct f2fs_sb_info *sbi)
+-{
+-	int ret = __submit_flush_wait(sbi, sbi->sb->s_bdev);
+-	int i;
+-
+-	if (!sbi->s_ndevs || ret)
+-		return ret;
+-
+-	for (i = 1; i < sbi->s_ndevs; i++) {
+-		ret = __submit_flush_wait(sbi, FDEV(i).bdev);
+-		if (ret)
+-			break;
+-	}
+-	return ret;
+-}
+-
+-static int issue_flush_thread(void *data)
+-{
+-	struct f2fs_sb_info *sbi = data;
+-	struct flush_cmd_control *fcc = SM_I(sbi)->fcc_info;
+-	wait_queue_head_t *q = &fcc->flush_wait_queue;
+-repeat:
+-	if (kthread_should_stop())
+-		return 0;
+-
+-	if (!llist_empty(&fcc->issue_list)) {
+-		struct flush_cmd *cmd, *next;
+-		int ret;
+-
+-		fcc->dispatch_list = llist_del_all(&fcc->issue_list);
+-		fcc->dispatch_list = llist_reverse_order(fcc->dispatch_list);
+-
+-		ret = submit_flush_wait(sbi);
+-		atomic_inc(&fcc->issued_flush);
+-
+-		llist_for_each_entry_safe(cmd, next,
+-					  fcc->dispatch_list, llnode) {
+-			cmd->ret = ret;
+-			complete(&cmd->wait);
+-		}
+-		fcc->dispatch_list = NULL;
+-	}
+-
+-	wait_event_interruptible(*q,
+-		kthread_should_stop() || !llist_empty(&fcc->issue_list));
+-	goto repeat;
+-}
+-
+-int f2fs_issue_flush(struct f2fs_sb_info *sbi)
+-{
+-	struct flush_cmd_control *fcc = SM_I(sbi)->fcc_info;
+-	struct flush_cmd cmd;
+-	int ret;
+-
+-	if (test_opt(sbi, NOBARRIER))
+-		return 0;
+-
+-	if (!test_opt(sbi, FLUSH_MERGE)) {
+-		ret = submit_flush_wait(sbi);
+-		atomic_inc(&fcc->issued_flush);
+-		return ret;
+-	}
+-
+-	if (!atomic_read(&fcc->issing_flush)) {
+-		atomic_inc(&fcc->issing_flush);
+-		ret = submit_flush_wait(sbi);
+-		atomic_dec(&fcc->issing_flush);
+-
+-		atomic_inc(&fcc->issued_flush);
+-		return ret;
+-	}
+-
+-	init_completion(&cmd.wait);
+-
+-	atomic_inc(&fcc->issing_flush);
+-	llist_add(&cmd.llnode, &fcc->issue_list);
+-
+-	if (!fcc->dispatch_list)
+-		wake_up(&fcc->flush_wait_queue);
+-
+-	if (fcc->f2fs_issue_flush) {
+-		wait_for_completion(&cmd.wait);
+-		atomic_dec(&fcc->issing_flush);
+-	} else {
+-		llist_del_all(&fcc->issue_list);
+-		atomic_set(&fcc->issing_flush, 0);
+-	}
+-
+-	return cmd.ret;
+-}
+-
+-int create_flush_cmd_control(struct f2fs_sb_info *sbi)
+-{
+-	dev_t dev = sbi->sb->s_bdev->bd_dev;
+-	struct flush_cmd_control *fcc;
+-	int err = 0;
+-
+-	if (SM_I(sbi)->fcc_info) {
+-		fcc = SM_I(sbi)->fcc_info;
+-		goto init_thread;
+-	}
+-
+-	fcc = kzalloc(sizeof(struct flush_cmd_control), GFP_KERNEL);
+-	if (!fcc)
+-		return -ENOMEM;
+-	atomic_set(&fcc->issued_flush, 0);
+-	atomic_set(&fcc->issing_flush, 0);
+-	init_waitqueue_head(&fcc->flush_wait_queue);
+-	init_llist_head(&fcc->issue_list);
+-	SM_I(sbi)->fcc_info = fcc;
+-	if (!test_opt(sbi, FLUSH_MERGE))
+-		return err;
+-
+-init_thread:
+-	fcc->f2fs_issue_flush = kthread_run(issue_flush_thread, sbi,
+-				"f2fs_flush-%u:%u", MAJOR(dev), MINOR(dev));
+-	if (IS_ERR(fcc->f2fs_issue_flush)) {
+-		err = PTR_ERR(fcc->f2fs_issue_flush);
+-		kfree(fcc);
+-		SM_I(sbi)->fcc_info = NULL;
+-		return err;
+-	}
+-
+-	return err;
+-}
+-
+-void destroy_flush_cmd_control(struct f2fs_sb_info *sbi, bool free)
+-{
+-	struct flush_cmd_control *fcc = SM_I(sbi)->fcc_info;
+-
+-	if (fcc && fcc->f2fs_issue_flush) {
+-		struct task_struct *flush_thread = fcc->f2fs_issue_flush;
+-
+-		fcc->f2fs_issue_flush = NULL;
+-		kthread_stop(flush_thread);
+-	}
+-	if (free) {
+-		kfree(fcc);
+-		SM_I(sbi)->fcc_info = NULL;
+-	}
+-}
+-
+-static void __locate_dirty_segment(struct f2fs_sb_info *sbi, unsigned int segno,
+-		enum dirty_type dirty_type)
+-{
+-	struct dirty_seglist_info *dirty_i = DIRTY_I(sbi);
+-
+-	/* need not be added */
+-	if (IS_CURSEG(sbi, segno))
+-		return;
+-
+-	if (!test_and_set_bit(segno, dirty_i->dirty_segmap[dirty_type]))
+-		dirty_i->nr_dirty[dirty_type]++;
+-
+-	if (dirty_type == DIRTY) {
+-		struct seg_entry *sentry = get_seg_entry(sbi, segno);
+-		enum dirty_type t = sentry->type;
+-
+-		if (unlikely(t >= DIRTY)) {
+-			f2fs_bug_on(sbi, 1);
+-			return;
+-		}
+-		if (!test_and_set_bit(segno, dirty_i->dirty_segmap[t]))
+-			dirty_i->nr_dirty[t]++;
+-	}
+-}
+-
+-static void __remove_dirty_segment(struct f2fs_sb_info *sbi, unsigned int segno,
+-		enum dirty_type dirty_type)
+-{
+-	struct dirty_seglist_info *dirty_i = DIRTY_I(sbi);
+-
+-	if (test_and_clear_bit(segno, dirty_i->dirty_segmap[dirty_type]))
+-		dirty_i->nr_dirty[dirty_type]--;
+-
+-	if (dirty_type == DIRTY) {
+-		struct seg_entry *sentry = get_seg_entry(sbi, segno);
+-		enum dirty_type t = sentry->type;
+-
+-		if (test_and_clear_bit(segno, dirty_i->dirty_segmap[t]))
+-			dirty_i->nr_dirty[t]--;
+-
+-		if (get_valid_blocks(sbi, segno, true) == 0)
+-			clear_bit(GET_SEC_FROM_SEG(sbi, segno),
+-						dirty_i->victim_secmap);
+-	}
+-}
+-
+-/*
+- * Should not occur error such as -ENOMEM.
+- * Adding dirty entry into seglist is not critical operation.
+- * If a given segment is one of current working segments, it won't be added.
+- */
+-static void locate_dirty_segment(struct f2fs_sb_info *sbi, unsigned int segno)
+-{
+-	struct dirty_seglist_info *dirty_i = DIRTY_I(sbi);
+-	unsigned short valid_blocks;
+-
+-	if (segno == NULL_SEGNO || IS_CURSEG(sbi, segno))
+-		return;
+-
+-	mutex_lock(&dirty_i->seglist_lock);
+-
+-	valid_blocks = get_valid_blocks(sbi, segno, false);
+-
+-	if (valid_blocks == 0) {
+-		__locate_dirty_segment(sbi, segno, PRE);
+-		__remove_dirty_segment(sbi, segno, DIRTY);
+-	} else if (valid_blocks < sbi->blocks_per_seg) {
+-		__locate_dirty_segment(sbi, segno, DIRTY);
+-	} else {
+-		/* Recovery routine with SSR needs this */
+-		__remove_dirty_segment(sbi, segno, DIRTY);
+-	}
+-
+-	mutex_unlock(&dirty_i->seglist_lock);
+-}
+-
+-static struct discard_cmd *__create_discard_cmd(struct f2fs_sb_info *sbi,
+-		struct block_device *bdev, block_t lstart,
+-		block_t start, block_t len)
+-{
+-	struct discard_cmd_control *dcc = SM_I(sbi)->dcc_info;
+-	struct list_head *pend_list;
+-	struct discard_cmd *dc;
+-
+-	f2fs_bug_on(sbi, !len);
+-
+-	pend_list = &dcc->pend_list[plist_idx(len)];
+-
+-	dc = f2fs_kmem_cache_alloc(discard_cmd_slab, GFP_NOFS);
+-	INIT_LIST_HEAD(&dc->list);
+-	dc->bdev = bdev;
+-	dc->lstart = lstart;
+-	dc->start = start;
+-	dc->len = len;
+-	dc->ref = 0;
+-	dc->state = D_PREP;
+-	dc->error = 0;
+-	init_completion(&dc->wait);
+-	list_add_tail(&dc->list, pend_list);
+-	atomic_inc(&dcc->discard_cmd_cnt);
+-	dcc->undiscard_blks += len;
+-
+-	return dc;
+-}
+-
+-static struct discard_cmd *__attach_discard_cmd(struct f2fs_sb_info *sbi,
+-				struct block_device *bdev, block_t lstart,
+-				block_t start, block_t len,
+-				struct rb_node *parent, struct rb_node **p)
+-{
+-	struct discard_cmd_control *dcc = SM_I(sbi)->dcc_info;
+-	struct discard_cmd *dc;
+-
+-	dc = __create_discard_cmd(sbi, bdev, lstart, start, len);
+-
+-	rb_link_node(&dc->rb_node, parent, p);
+-	rb_insert_color(&dc->rb_node, &dcc->root);
+-
+-	return dc;
+-}
+-
+-static void __detach_discard_cmd(struct discard_cmd_control *dcc,
+-							struct discard_cmd *dc)
+-{
+-	if (dc->state == D_DONE)
+-		atomic_dec(&dcc->issing_discard);
+-
+-	list_del(&dc->list);
+-	rb_erase(&dc->rb_node, &dcc->root);
+-	dcc->undiscard_blks -= dc->len;
+-
+-	kmem_cache_free(discard_cmd_slab, dc);
+-
+-	atomic_dec(&dcc->discard_cmd_cnt);
+-}
+-
+-static void __remove_discard_cmd(struct f2fs_sb_info *sbi,
+-							struct discard_cmd *dc)
+-{
+-	struct discard_cmd_control *dcc = SM_I(sbi)->dcc_info;
+-
+-	if (dc->error == -EOPNOTSUPP)
+-		dc->error = 0;
+-
+-	if (dc->error)
+-		f2fs_msg(sbi->sb, KERN_INFO,
+-				"Issue discard failed, ret: %d", dc->error);
+-	__detach_discard_cmd(dcc, dc);
+-}
+-
+-static void f2fs_submit_discard_endio(struct bio *bio, int err)
+-{
+-	struct discard_cmd *dc = (struct discard_cmd *)bio->bi_private;
+-
+-	dc->error = err;
+-	dc->state = D_DONE;
+-	complete(&dc->wait);
+-	bio_put(bio);
+-}
+-
+-/* copied from block/blk-lib.c in 4.10-rc1 */
+-static int __blkdev_issue_discard(struct block_device *bdev, sector_t sector,
+-		sector_t nr_sects, gfp_t gfp_mask, int flags,
+-		struct bio **biop)
+-{
+-	struct request_queue *q = bdev_get_queue(bdev);
+-	struct bio *bio = *biop;
+-	unsigned int granularity;
+-	int op = REQ_WRITE | REQ_DISCARD;
+-	int alignment;
+-	sector_t bs_mask;
+-
+-	if (!q)
+-		return -ENXIO;
+-
+-	if (!blk_queue_discard(q))
+-		return -EOPNOTSUPP;
+-
+-	if (flags & BLKDEV_DISCARD_SECURE) {
+-		if (!blk_queue_secdiscard(q))
+-			return -EOPNOTSUPP;
+-		op |= REQ_SECURE;
+-	}
+-
+-	bs_mask = (bdev_logical_block_size(bdev) >> 9) - 1;
+-	if ((sector | nr_sects) & bs_mask)
+-		return -EINVAL;
+-
+-	/* Zero-sector (unknown) and one-sector granularities are the same.  */
+-	granularity = max(q->limits.discard_granularity >> 9, 1U);
+-	alignment = (bdev_discard_alignment(bdev) >> 9) % granularity;
+-
+-	while (nr_sects) {
+-		unsigned int req_sects;
+-		sector_t end_sect, tmp;
+-
+-		/* Make sure bi_size doesn't overflow */
+-		req_sects = min_t(sector_t, nr_sects, UINT_MAX >> 9);
+-
+-		/**
+-		 * If splitting a request, and the next starting sector would be
+-		 * misaligned, stop the discard at the previous aligned sector.
+-		 */
+-		end_sect = sector + req_sects;
+-		tmp = end_sect;
+-		if (req_sects < nr_sects &&
+-		    sector_div(tmp, granularity) != alignment) {
+-			end_sect = end_sect - alignment;
+-			sector_div(end_sect, granularity);
+-			end_sect = end_sect * granularity + alignment;
+-			req_sects = end_sect - sector;
+-		}
+-
+-		if (bio) {
+-			int ret = submit_bio_wait(0, bio);
+-			bio_put(bio);
+-			if (ret)
+-				return ret;
+-		}
+-		bio = f2fs_bio_alloc(1);
+-		bio->bi_sector = sector;
+-		bio->bi_bdev = bdev;
+-		bio_set_op_attrs(bio, op, 0);
+-
+-		bio->bi_size = req_sects << 9;
+-		nr_sects -= req_sects;
+-		sector = end_sect;
+-
+-		/*
+-		 * We can loop for a long time in here, if someone does
+-		 * full device discards (like mkfs). Be nice and allow
+-		 * us to schedule out to avoid softlocking if preempt
+-		 * is disabled.
+-		 */
+-		cond_resched();
+-	}
+-
+-	*biop = bio;
+-	return 0;
+-}
+-
+-static void __submit_discard_cmd(struct f2fs_sb_info *sbi,
+-				struct discard_cmd *dc)
+-{
+-	struct discard_cmd_control *dcc = SM_I(sbi)->dcc_info;
+-	struct bio *bio = NULL;
+-
+-	if (dc->state != D_PREP)
+-		return;
+-
+-	trace_f2fs_issue_discard(dc->bdev, dc->start, dc->len);
+-
+-	dc->error = __blkdev_issue_discard(dc->bdev,
+-				SECTOR_FROM_BLOCK(dc->start),
+-				SECTOR_FROM_BLOCK(dc->len),
+-				GFP_NOFS, 0, &bio);
+-	if (!dc->error) {
+-		/* should keep before submission to avoid D_DONE right away */
+-		dc->state = D_SUBMIT;
+-		atomic_inc(&dcc->issued_discard);
+-		atomic_inc(&dcc->issing_discard);
+-		if (bio) {
+-			bio->bi_private = dc;
+-			bio->bi_end_io = f2fs_submit_discard_endio;
+-			submit_bio(REQ_SYNC, bio);
+-			list_move_tail(&dc->list, &dcc->wait_list);
+-		}
+-	} else {
+-		__remove_discard_cmd(sbi, dc);
+-	}
+-}
+-
+-static struct discard_cmd *__insert_discard_tree(struct f2fs_sb_info *sbi,
+-				struct block_device *bdev, block_t lstart,
+-				block_t start, block_t len,
+-				struct rb_node **insert_p,
+-				struct rb_node *insert_parent)
+-{
+-	struct discard_cmd_control *dcc = SM_I(sbi)->dcc_info;
+-	struct rb_node **p = &dcc->root.rb_node;
+-	struct rb_node *parent = NULL;
+-	struct discard_cmd *dc = NULL;
+-
+-	if (insert_p && insert_parent) {
+-		parent = insert_parent;
+-		p = insert_p;
+-		goto do_insert;
+-	}
+-
+-	p = __lookup_rb_tree_for_insert(sbi, &dcc->root, &parent, lstart);
+-do_insert:
+-	dc = __attach_discard_cmd(sbi, bdev, lstart, start, len, parent, p);
+-	if (!dc)
+-		return NULL;
+-
+-	return dc;
+-}
+-
+-static void __relocate_discard_cmd(struct discard_cmd_control *dcc,
+-						struct discard_cmd *dc)
+-{
+-	list_move_tail(&dc->list, &dcc->pend_list[plist_idx(dc->len)]);
+-}
+-
+-static void __punch_discard_cmd(struct f2fs_sb_info *sbi,
+-				struct discard_cmd *dc, block_t blkaddr)
+-{
+-	struct discard_cmd_control *dcc = SM_I(sbi)->dcc_info;
+-	struct discard_info di = dc->di;
+-	bool modified = false;
+-
+-	if (dc->state == D_DONE || dc->len == 1) {
+-		__remove_discard_cmd(sbi, dc);
+-		return;
+-	}
+-
+-	dcc->undiscard_blks -= di.len;
+-
+-	if (blkaddr > di.lstart) {
+-		dc->len = blkaddr - dc->lstart;
+-		dcc->undiscard_blks += dc->len;
+-		__relocate_discard_cmd(dcc, dc);
+-		f2fs_bug_on(sbi, !__check_rb_tree_consistence(sbi, &dcc->root));
+-		modified = true;
+-	}
+-
+-	if (blkaddr < di.lstart + di.len - 1) {
+-		if (modified) {
+-			__insert_discard_tree(sbi, dc->bdev, blkaddr + 1,
+-					di.start + blkaddr + 1 - di.lstart,
+-					di.lstart + di.len - 1 - blkaddr,
+-					NULL, NULL);
+-			f2fs_bug_on(sbi,
+-				!__check_rb_tree_consistence(sbi, &dcc->root));
+-		} else {
+-			dc->lstart++;
+-			dc->len--;
+-			dc->start++;
+-			dcc->undiscard_blks += dc->len;
+-			__relocate_discard_cmd(dcc, dc);
+-			f2fs_bug_on(sbi,
+-				!__check_rb_tree_consistence(sbi, &dcc->root));
+-		}
+-	}
+-}
+-
+-static void __update_discard_tree_range(struct f2fs_sb_info *sbi,
+-				struct block_device *bdev, block_t lstart,
+-				block_t start, block_t len)
+-{
+-	struct discard_cmd_control *dcc = SM_I(sbi)->dcc_info;
+-	struct discard_cmd *prev_dc = NULL, *next_dc = NULL;
+-	struct discard_cmd *dc;
+-	struct discard_info di = {0};
+-	struct rb_node **insert_p = NULL, *insert_parent = NULL;
+-	block_t end = lstart + len;
+-
+-	mutex_lock(&dcc->cmd_lock);
+-
+-	dc = (struct discard_cmd *)__lookup_rb_tree_ret(&dcc->root,
+-					NULL, lstart,
+-					(struct rb_entry **)&prev_dc,
+-					(struct rb_entry **)&next_dc,
+-					&insert_p, &insert_parent, true);
+-	if (dc)
+-		prev_dc = dc;
+-
+-	if (!prev_dc) {
+-		di.lstart = lstart;
+-		di.len = next_dc ? next_dc->lstart - lstart : len;
+-		di.len = min(di.len, len);
+-		di.start = start;
+-	}
+-
+-	while (1) {
+-		struct rb_node *node;
+-		bool merged = false;
+-		struct discard_cmd *tdc = NULL;
+-
+-		if (prev_dc) {
+-			di.lstart = prev_dc->lstart + prev_dc->len;
+-			if (di.lstart < lstart)
+-				di.lstart = lstart;
+-			if (di.lstart >= end)
+-				break;
+-
+-			if (!next_dc || next_dc->lstart > end)
+-				di.len = end - di.lstart;
+-			else
+-				di.len = next_dc->lstart - di.lstart;
+-			di.start = start + di.lstart - lstart;
+-		}
+-
+-		if (!di.len)
+-			goto next;
+-
+-		if (prev_dc && prev_dc->state == D_PREP &&
+-			prev_dc->bdev == bdev &&
+-			__is_discard_back_mergeable(&di, &prev_dc->di)) {
+-			prev_dc->di.len += di.len;
+-			dcc->undiscard_blks += di.len;
+-			__relocate_discard_cmd(dcc, prev_dc);
+-			f2fs_bug_on(sbi,
+-				!__check_rb_tree_consistence(sbi, &dcc->root));
+-			di = prev_dc->di;
+-			tdc = prev_dc;
+-			merged = true;
+-		}
+-
+-		if (next_dc && next_dc->state == D_PREP &&
+-			next_dc->bdev == bdev &&
+-			__is_discard_front_mergeable(&di, &next_dc->di)) {
+-			next_dc->di.lstart = di.lstart;
+-			next_dc->di.len += di.len;
+-			next_dc->di.start = di.start;
+-			dcc->undiscard_blks += di.len;
+-			__relocate_discard_cmd(dcc, next_dc);
+-			if (tdc)
+-				__remove_discard_cmd(sbi, tdc);
+-			f2fs_bug_on(sbi,
+-				!__check_rb_tree_consistence(sbi, &dcc->root));
+-			merged = true;
+-		}
+-
+-		if (!merged) {
+-			__insert_discard_tree(sbi, bdev, di.lstart, di.start,
+-							di.len, NULL, NULL);
+-			f2fs_bug_on(sbi,
+-				!__check_rb_tree_consistence(sbi, &dcc->root));
+-		}
+- next:
+-		prev_dc = next_dc;
+-		if (!prev_dc)
+-			break;
+-
+-		node = rb_next(&prev_dc->rb_node);
+-		next_dc = rb_entry_safe(node, struct discard_cmd, rb_node);
+-	}
+-
+-	mutex_unlock(&dcc->cmd_lock);
+-}
+-
+-static int __queue_discard_cmd(struct f2fs_sb_info *sbi,
+-		struct block_device *bdev, block_t blkstart, block_t blklen)
+-{
+-	block_t lblkstart = blkstart;
+-
+-	trace_f2fs_queue_discard(bdev, blkstart, blklen);
+-
+-	if (sbi->s_ndevs) {
+-		int devi = f2fs_target_device_index(sbi, blkstart);
+-
+-		blkstart -= FDEV(devi).start_blk;
+-	}
+-	__update_discard_tree_range(sbi, bdev, lblkstart, blkstart, blklen);
+-	return 0;
+-}
+-
+-static void __issue_discard_cmd(struct f2fs_sb_info *sbi, bool issue_cond)
+-{
+-	struct discard_cmd_control *dcc = SM_I(sbi)->dcc_info;
+-	struct list_head *pend_list;
+-	struct discard_cmd *dc, *tmp;
+-	struct blk_plug plug;
+-	int i, iter = 0;
+-
+-	mutex_lock(&dcc->cmd_lock);
+-	blk_start_plug(&plug);
+-	for (i = MAX_PLIST_NUM - 1; i >= 0; i--) {
+-		pend_list = &dcc->pend_list[i];
+-		list_for_each_entry_safe(dc, tmp, pend_list, list) {
+-			f2fs_bug_on(sbi, dc->state != D_PREP);
+-
+-			if (!issue_cond || is_idle(sbi))
+-				__submit_discard_cmd(sbi, dc);
+-			if (issue_cond && iter++ > DISCARD_ISSUE_RATE)
+-				goto out;
+-		}
+-	}
+-out:
+-	blk_finish_plug(&plug);
+-	mutex_unlock(&dcc->cmd_lock);
+-}
+-
+-static void __wait_discard_cmd(struct f2fs_sb_info *sbi, bool wait_cond)
+-{
+-	struct discard_cmd_control *dcc = SM_I(sbi)->dcc_info;
+-	struct list_head *wait_list = &(dcc->wait_list);
+-	struct discard_cmd *dc, *tmp;
+-
+-	mutex_lock(&dcc->cmd_lock);
+-	list_for_each_entry_safe(dc, tmp, wait_list, list) {
+-		if (!wait_cond || dc->state == D_DONE) {
+-			if (dc->ref)
+-				continue;
+-			wait_for_completion_io(&dc->wait);
+-			__remove_discard_cmd(sbi, dc);
+-		}
+-	}
+-	mutex_unlock(&dcc->cmd_lock);
+-}
+-
+-/* This should be covered by global mutex, &sit_i->sentry_lock */
+-void f2fs_wait_discard_bio(struct f2fs_sb_info *sbi, block_t blkaddr)
+-{
+-	struct discard_cmd_control *dcc = SM_I(sbi)->dcc_info;
+-	struct discard_cmd *dc;
+-	bool need_wait = false;
+-
+-	mutex_lock(&dcc->cmd_lock);
+-	dc = (struct discard_cmd *)__lookup_rb_tree(&dcc->root, NULL, blkaddr);
+-	if (dc) {
+-		if (dc->state == D_PREP) {
+-			__punch_discard_cmd(sbi, dc, blkaddr);
+-		} else {
+-			dc->ref++;
+-			need_wait = true;
+-		}
+-	}
+-	mutex_unlock(&dcc->cmd_lock);
+-
+-	if (need_wait) {
+-		wait_for_completion_io(&dc->wait);
+-		mutex_lock(&dcc->cmd_lock);
+-		f2fs_bug_on(sbi, dc->state != D_DONE);
+-		dc->ref--;
+-		if (!dc->ref)
+-			__remove_discard_cmd(sbi, dc);
+-		mutex_unlock(&dcc->cmd_lock);
+-	}
+-}
+-
+-/* This comes from f2fs_put_super */
+-void f2fs_wait_discard_bios(struct f2fs_sb_info *sbi)
+-{
+-	__issue_discard_cmd(sbi, false);
+-	__wait_discard_cmd(sbi, false);
+-}
+-
+-static int issue_discard_thread(void *data)
+-{
+-	struct f2fs_sb_info *sbi = data;
+-	struct discard_cmd_control *dcc = SM_I(sbi)->dcc_info;
+-	wait_queue_head_t *q = &dcc->discard_wait_queue;
+-repeat:
+-	if (kthread_should_stop())
+-		return 0;
+-
+-	__issue_discard_cmd(sbi, true);
+-	__wait_discard_cmd(sbi, true);
+-
+-	congestion_wait(BLK_RW_SYNC, HZ/50);
+-
+-	wait_event_interruptible(*q, kthread_should_stop() ||
+-				atomic_read(&dcc->discard_cmd_cnt));
+-	goto repeat;
+-}
+-
+-#ifdef CONFIG_BLK_DEV_ZONED
+-static int __f2fs_issue_discard_zone(struct f2fs_sb_info *sbi,
+-		struct block_device *bdev, block_t blkstart, block_t blklen)
+-{
+-	sector_t sector, nr_sects;
+-	block_t lblkstart = blkstart;
+-	int devi = 0;
+-
+-	if (sbi->s_ndevs) {
+-		devi = f2fs_target_device_index(sbi, blkstart);
+-		blkstart -= FDEV(devi).start_blk;
+-	}
+-
+-	/*
+-	 * We need to know the type of the zone: for conventional zones,
+-	 * use regular discard if the drive supports it. For sequential
+-	 * zones, reset the zone write pointer.
+-	 */
+-	switch (get_blkz_type(sbi, bdev, blkstart)) {
+-
+-	case BLK_ZONE_TYPE_CONVENTIONAL:
+-		if (!blk_queue_discard(bdev_get_queue(bdev)))
+-			return 0;
+-		return __queue_discard_cmd(sbi, bdev, lblkstart, blklen);
+-	case BLK_ZONE_TYPE_SEQWRITE_REQ:
+-	case BLK_ZONE_TYPE_SEQWRITE_PREF:
+-		sector = SECTOR_FROM_BLOCK(blkstart);
+-		nr_sects = SECTOR_FROM_BLOCK(blklen);
+-
+-		if (sector & (bdev_zone_size(bdev) - 1) ||
+-				nr_sects != bdev_zone_size(bdev)) {
+-			f2fs_msg(sbi->sb, KERN_INFO,
+-				"(%d) %s: Unaligned discard attempted (block %x + %x)",
+-				devi, sbi->s_ndevs ? FDEV(devi).path: "",
+-				blkstart, blklen);
+-			return -EIO;
+-		}
+-		trace_f2fs_issue_reset_zone(bdev, blkstart);
+-		return blkdev_reset_zones(bdev, sector,
+-					  nr_sects, GFP_NOFS);
+-	default:
+-		/* Unknown zone type: broken device ? */
+-		return -EIO;
+-	}
+-}
+-#endif
+-
+-static int __issue_discard_async(struct f2fs_sb_info *sbi,
+-		struct block_device *bdev, block_t blkstart, block_t blklen)
+-{
+-#ifdef CONFIG_BLK_DEV_ZONED
+-	if (f2fs_sb_mounted_blkzoned(sbi->sb) &&
+-				bdev_zoned_model(bdev) != BLK_ZONED_NONE)
+-		return __f2fs_issue_discard_zone(sbi, bdev, blkstart, blklen);
+-#endif
+-	return __queue_discard_cmd(sbi, bdev, blkstart, blklen);
+-}
+-
+-static int f2fs_issue_discard(struct f2fs_sb_info *sbi,
+-				block_t blkstart, block_t blklen)
+-{
+-	sector_t start = blkstart, len = 0;
+-	struct block_device *bdev;
+-	struct seg_entry *se;
+-	unsigned int offset;
+-	block_t i;
+-	int err = 0;
+-
+-	bdev = f2fs_target_device(sbi, blkstart, NULL);
+-
+-	for (i = blkstart; i < blkstart + blklen; i++, len++) {
+-		if (i != start) {
+-			struct block_device *bdev2 =
+-				f2fs_target_device(sbi, i, NULL);
+-
+-			if (bdev2 != bdev) {
+-				err = __issue_discard_async(sbi, bdev,
+-						start, len);
+-				if (err)
+-					return err;
+-				bdev = bdev2;
+-				start = i;
+-				len = 0;
+-			}
+-		}
+-
+-		se = get_seg_entry(sbi, GET_SEGNO(sbi, i));
+-		offset = GET_BLKOFF_FROM_SEG0(sbi, i);
+-
+-		if (!f2fs_test_and_set_bit(offset, se->discard_map))
+-			sbi->discard_blks--;
+-	}
+-
+-	if (len)
+-		err = __issue_discard_async(sbi, bdev, start, len);
+-	return err;
+-}
+-
+-static bool add_discard_addrs(struct f2fs_sb_info *sbi, struct cp_control *cpc,
+-							bool check_only)
+-{
+-	int entries = SIT_VBLOCK_MAP_SIZE / sizeof(unsigned long);
+-	int max_blocks = sbi->blocks_per_seg;
+-	struct seg_entry *se = get_seg_entry(sbi, cpc->trim_start);
+-	unsigned long *cur_map = (unsigned long *)se->cur_valid_map;
+-	unsigned long *ckpt_map = (unsigned long *)se->ckpt_valid_map;
+-	unsigned long *discard_map = (unsigned long *)se->discard_map;
+-	unsigned long *dmap = SIT_I(sbi)->tmp_map;
+-	unsigned int start = 0, end = -1;
+-	bool force = (cpc->reason & CP_DISCARD);
+-	struct discard_entry *de = NULL;
+-	struct list_head *head = &SM_I(sbi)->dcc_info->entry_list;
+-	int i;
+-
+-	if (se->valid_blocks == max_blocks || !f2fs_discard_en(sbi))
+-		return false;
+-
+-	if (!force) {
+-		if (!test_opt(sbi, DISCARD) || !se->valid_blocks ||
+-			SM_I(sbi)->dcc_info->nr_discards >=
+-				SM_I(sbi)->dcc_info->max_discards)
+-			return false;
+-	}
+-
+-	/* SIT_VBLOCK_MAP_SIZE should be multiple of sizeof(unsigned long) */
+-	for (i = 0; i < entries; i++)
+-		dmap[i] = force ? ~ckpt_map[i] & ~discard_map[i] :
+-				(cur_map[i] ^ ckpt_map[i]) & ckpt_map[i];
+-
+-	while (force || SM_I(sbi)->dcc_info->nr_discards <=
+-				SM_I(sbi)->dcc_info->max_discards) {
+-		start = __find_rev_next_bit(dmap, max_blocks, end + 1);
+-		if (start >= max_blocks)
+-			break;
+-
+-		end = __find_rev_next_zero_bit(dmap, max_blocks, start + 1);
+-		if (force && start && end != max_blocks
+-					&& (end - start) < cpc->trim_minlen)
+-			continue;
+-
+-		if (check_only)
+-			return true;
+-
+-		if (!de) {
+-			de = f2fs_kmem_cache_alloc(discard_entry_slab,
+-								GFP_F2FS_ZERO);
+-			de->start_blkaddr = START_BLOCK(sbi, cpc->trim_start);
+-			list_add_tail(&de->list, head);
+-		}
+-
+-		for (i = start; i < end; i++)
+-			__set_bit_le(i, (void *)de->discard_map);
+-
+-		SM_I(sbi)->dcc_info->nr_discards += end - start;
+-	}
+-	return false;
+-}
+-
+-void release_discard_addrs(struct f2fs_sb_info *sbi)
+-{
+-	struct list_head *head = &(SM_I(sbi)->dcc_info->entry_list);
+-	struct discard_entry *entry, *this;
+-
+-	/* drop caches */
+-	list_for_each_entry_safe(entry, this, head, list) {
+-		list_del(&entry->list);
+-		kmem_cache_free(discard_entry_slab, entry);
+-	}
+-}
+-
+-/*
+- * Should call clear_prefree_segments after checkpoint is done.
+- */
+-static void set_prefree_as_free_segments(struct f2fs_sb_info *sbi)
+-{
+-	struct dirty_seglist_info *dirty_i = DIRTY_I(sbi);
+-	unsigned int segno;
+-
+-	mutex_lock(&dirty_i->seglist_lock);
+-	for_each_set_bit(segno, dirty_i->dirty_segmap[PRE], MAIN_SEGS(sbi))
+-		__set_test_and_free(sbi, segno);
+-	mutex_unlock(&dirty_i->seglist_lock);
+-}
+-
+-void clear_prefree_segments(struct f2fs_sb_info *sbi, struct cp_control *cpc)
+-{
+-	struct list_head *head = &(SM_I(sbi)->dcc_info->entry_list);
+-	struct discard_entry *entry, *this;
+-	struct dirty_seglist_info *dirty_i = DIRTY_I(sbi);
+-	unsigned long *prefree_map = dirty_i->dirty_segmap[PRE];
+-	unsigned int start = 0, end = -1;
+-	unsigned int secno, start_segno;
+-	bool force = (cpc->reason & CP_DISCARD);
+-
+-	mutex_lock(&dirty_i->seglist_lock);
+-
+-	while (1) {
+-		int i;
+-		start = find_next_bit(prefree_map, MAIN_SEGS(sbi), end + 1);
+-		if (start >= MAIN_SEGS(sbi))
+-			break;
+-		end = find_next_zero_bit(prefree_map, MAIN_SEGS(sbi),
+-								start + 1);
+-
+-		for (i = start; i < end; i++)
+-			clear_bit(i, prefree_map);
+-
+-		dirty_i->nr_dirty[PRE] -= end - start;
+-
+-		if (!test_opt(sbi, DISCARD))
+-			continue;
+-
+-		if (force && start >= cpc->trim_start &&
+-					(end - 1) <= cpc->trim_end)
+-				continue;
+-
+-		if (!test_opt(sbi, LFS) || sbi->segs_per_sec == 1) {
+-			f2fs_issue_discard(sbi, START_BLOCK(sbi, start),
+-				(end - start) << sbi->log_blocks_per_seg);
+-			continue;
+-		}
+-next:
+-		secno = GET_SEC_FROM_SEG(sbi, start);
+-		start_segno = GET_SEG_FROM_SEC(sbi, secno);
+-		if (!IS_CURSEC(sbi, secno) &&
+-			!get_valid_blocks(sbi, start, true))
+-			f2fs_issue_discard(sbi, START_BLOCK(sbi, start_segno),
+-				sbi->segs_per_sec << sbi->log_blocks_per_seg);
+-
+-		start = start_segno + sbi->segs_per_sec;
+-		if (start < end)
+-			goto next;
+-		else
+-			end = start - 1;
+-	}
+-	mutex_unlock(&dirty_i->seglist_lock);
+-
+-	/* send small discards */
+-	list_for_each_entry_safe(entry, this, head, list) {
+-		unsigned int cur_pos = 0, next_pos, len, total_len = 0;
+-		bool is_valid = test_bit_le(0, entry->discard_map);
+-
+-find_next:
+-		if (is_valid) {
+-			next_pos = find_next_zero_bit_le(entry->discard_map,
+-					sbi->blocks_per_seg, cur_pos);
+-			len = next_pos - cur_pos;
+-
+-			if (force && len < cpc->trim_minlen)
+-				goto skip;
+-
+-			f2fs_issue_discard(sbi, entry->start_blkaddr + cur_pos,
+-									len);
+-			cpc->trimmed += len;
+-			total_len += len;
+-		} else {
+-			next_pos = find_next_bit_le(entry->discard_map,
+-					sbi->blocks_per_seg, cur_pos);
+-		}
+-skip:
+-		cur_pos = next_pos;
+-		is_valid = !is_valid;
+-
+-		if (cur_pos < sbi->blocks_per_seg)
+-			goto find_next;
+-
+-		list_del(&entry->list);
+-		SM_I(sbi)->dcc_info->nr_discards -= total_len;
+-		kmem_cache_free(discard_entry_slab, entry);
+-	}
+-
+-	wake_up(&SM_I(sbi)->dcc_info->discard_wait_queue);
+-}
+-
+-static int create_discard_cmd_control(struct f2fs_sb_info *sbi)
+-{
+-	dev_t dev = sbi->sb->s_bdev->bd_dev;
+-	struct discard_cmd_control *dcc;
+-	int err = 0, i;
+-
+-	if (SM_I(sbi)->dcc_info) {
+-		dcc = SM_I(sbi)->dcc_info;
+-		goto init_thread;
+-	}
+-
+-	dcc = kzalloc(sizeof(struct discard_cmd_control), GFP_KERNEL);
+-	if (!dcc)
+-		return -ENOMEM;
+-
+-	INIT_LIST_HEAD(&dcc->entry_list);
+-	for (i = 0; i < MAX_PLIST_NUM; i++)
+-		INIT_LIST_HEAD(&dcc->pend_list[i]);
+-	INIT_LIST_HEAD(&dcc->wait_list);
+-	mutex_init(&dcc->cmd_lock);
+-	atomic_set(&dcc->issued_discard, 0);
+-	atomic_set(&dcc->issing_discard, 0);
+-	atomic_set(&dcc->discard_cmd_cnt, 0);
+-	dcc->nr_discards = 0;
+-	dcc->max_discards = MAIN_SEGS(sbi) << sbi->log_blocks_per_seg;
+-	dcc->undiscard_blks = 0;
+-	dcc->root = RB_ROOT;
+-
+-	init_waitqueue_head(&dcc->discard_wait_queue);
+-	SM_I(sbi)->dcc_info = dcc;
+-init_thread:
+-	dcc->f2fs_issue_discard = kthread_run(issue_discard_thread, sbi,
+-				"f2fs_discard-%u:%u", MAJOR(dev), MINOR(dev));
+-	if (IS_ERR(dcc->f2fs_issue_discard)) {
+-		err = PTR_ERR(dcc->f2fs_issue_discard);
+-		kfree(dcc);
+-		SM_I(sbi)->dcc_info = NULL;
+-		return err;
+-	}
+-
+-	return err;
+-}
+-
+-static void destroy_discard_cmd_control(struct f2fs_sb_info *sbi)
+-{
+-	struct discard_cmd_control *dcc = SM_I(sbi)->dcc_info;
+-
+-	if (!dcc)
+-		return;
+-
+-	if (dcc->f2fs_issue_discard) {
+-		struct task_struct *discard_thread = dcc->f2fs_issue_discard;
+-
+-		dcc->f2fs_issue_discard = NULL;
+-		kthread_stop(discard_thread);
+-	}
+-
+-	kfree(dcc);
+-	SM_I(sbi)->dcc_info = NULL;
+-}
+-
+-static bool __mark_sit_entry_dirty(struct f2fs_sb_info *sbi, unsigned int segno)
+-{
+-	struct sit_info *sit_i = SIT_I(sbi);
+-
+-	if (!__test_and_set_bit(segno, sit_i->dirty_sentries_bitmap)) {
+-		sit_i->dirty_sentries++;
+-		return false;
+-	}
+-
+-	return true;
+-}
+-
+-static void __set_sit_entry_type(struct f2fs_sb_info *sbi, int type,
+-					unsigned int segno, int modified)
+-{
+-	struct seg_entry *se = get_seg_entry(sbi, segno);
+-	se->type = type;
+-	if (modified)
+-		__mark_sit_entry_dirty(sbi, segno);
+-}
+-
+-static void update_sit_entry(struct f2fs_sb_info *sbi, block_t blkaddr, int del)
+-{
+-	struct seg_entry *se;
+-	unsigned int segno, offset;
+-	long int new_vblocks;
+-
+-	segno = GET_SEGNO(sbi, blkaddr);
+-
+-	se = get_seg_entry(sbi, segno);
+-	new_vblocks = se->valid_blocks + del;
+-	offset = GET_BLKOFF_FROM_SEG0(sbi, blkaddr);
+-
+-	f2fs_bug_on(sbi, (new_vblocks >> (sizeof(unsigned short) << 3) ||
+-				(new_vblocks > sbi->blocks_per_seg)));
+-
+-	se->valid_blocks = new_vblocks;
+-	se->mtime = get_mtime(sbi);
+-	SIT_I(sbi)->max_mtime = se->mtime;
+-
+-	/* Update valid block bitmap */
+-	if (del > 0) {
+-		if (f2fs_test_and_set_bit(offset, se->cur_valid_map)) {
+-#ifdef CONFIG_F2FS_CHECK_FS
+-			if (f2fs_test_and_set_bit(offset,
+-						se->cur_valid_map_mir))
+-				f2fs_bug_on(sbi, 1);
+-			else
+-				WARN_ON(1);
+-#else
+-			f2fs_bug_on(sbi, 1);
+-#endif
+-		}
+-		if (f2fs_discard_en(sbi) &&
+-			!f2fs_test_and_set_bit(offset, se->discard_map))
+-			sbi->discard_blks--;
+-
+-		/* don't overwrite by SSR to keep node chain */
+-		if (se->type == CURSEG_WARM_NODE) {
+-			if (!f2fs_test_and_set_bit(offset, se->ckpt_valid_map))
+-				se->ckpt_valid_blocks++;
+-		}
+-	} else {
+-		if (!f2fs_test_and_clear_bit(offset, se->cur_valid_map)) {
+-#ifdef CONFIG_F2FS_CHECK_FS
+-			if (!f2fs_test_and_clear_bit(offset,
+-						se->cur_valid_map_mir))
+-				f2fs_bug_on(sbi, 1);
+-			else
+-				WARN_ON(1);
+-#else
+-			f2fs_bug_on(sbi, 1);
+-#endif
+-		}
+-		if (f2fs_discard_en(sbi) &&
+-			f2fs_test_and_clear_bit(offset, se->discard_map))
+-			sbi->discard_blks++;
+-	}
+-	if (!f2fs_test_bit(offset, se->ckpt_valid_map))
+-		se->ckpt_valid_blocks += del;
+-
+-	__mark_sit_entry_dirty(sbi, segno);
+-
+-	/* update total number of valid blocks to be written in ckpt area */
+-	SIT_I(sbi)->written_valid_blocks += del;
+-
+-	if (sbi->segs_per_sec > 1)
+-		get_sec_entry(sbi, segno)->valid_blocks += del;
+-}
+-
+-void refresh_sit_entry(struct f2fs_sb_info *sbi, block_t old, block_t new)
+-{
+-	update_sit_entry(sbi, new, 1);
+-	if (GET_SEGNO(sbi, old) != NULL_SEGNO)
+-		update_sit_entry(sbi, old, -1);
+-
+-	locate_dirty_segment(sbi, GET_SEGNO(sbi, old));
+-	locate_dirty_segment(sbi, GET_SEGNO(sbi, new));
+-}
+-
+-void invalidate_blocks(struct f2fs_sb_info *sbi, block_t addr)
+-{
+-	unsigned int segno = GET_SEGNO(sbi, addr);
+-	struct sit_info *sit_i = SIT_I(sbi);
+-
+-	f2fs_bug_on(sbi, addr == NULL_ADDR);
+-	if (addr == NEW_ADDR)
+-		return;
+-
+-	/* add it into sit main buffer */
+-	mutex_lock(&sit_i->sentry_lock);
+-
+-	update_sit_entry(sbi, addr, -1);
+-
+-	/* add it into dirty seglist */
+-	locate_dirty_segment(sbi, segno);
+-
+-	mutex_unlock(&sit_i->sentry_lock);
+-}
+-
+-bool is_checkpointed_data(struct f2fs_sb_info *sbi, block_t blkaddr)
+-{
+-	struct sit_info *sit_i = SIT_I(sbi);
+-	unsigned int segno, offset;
+-	struct seg_entry *se;
+-	bool is_cp = false;
+-
+-	if (blkaddr == NEW_ADDR || blkaddr == NULL_ADDR)
+-		return true;
+-
+-	mutex_lock(&sit_i->sentry_lock);
+-
+-	segno = GET_SEGNO(sbi, blkaddr);
+-	se = get_seg_entry(sbi, segno);
+-	offset = GET_BLKOFF_FROM_SEG0(sbi, blkaddr);
+-
+-	if (f2fs_test_bit(offset, se->ckpt_valid_map))
+-		is_cp = true;
+-
+-	mutex_unlock(&sit_i->sentry_lock);
+-
+-	return is_cp;
+-}
+-
+-/*
+- * This function should be resided under the curseg_mutex lock
+- */
+-static void __add_sum_entry(struct f2fs_sb_info *sbi, int type,
+-					struct f2fs_summary *sum)
+-{
+-	struct curseg_info *curseg = CURSEG_I(sbi, type);
+-	void *addr = curseg->sum_blk;
+-	addr += curseg->next_blkoff * sizeof(struct f2fs_summary);
+-	memcpy(addr, sum, sizeof(struct f2fs_summary));
+-}
+-
+-/*
+- * Calculate the number of current summary pages for writing
+- */
+-int npages_for_summary_flush(struct f2fs_sb_info *sbi, bool for_ra)
+-{
+-	int valid_sum_count = 0;
+-	int i, sum_in_page;
+-
+-	for (i = CURSEG_HOT_DATA; i <= CURSEG_COLD_DATA; i++) {
+-		if (sbi->ckpt->alloc_type[i] == SSR)
+-			valid_sum_count += sbi->blocks_per_seg;
+-		else {
+-			if (for_ra)
+-				valid_sum_count += le16_to_cpu(
+-					F2FS_CKPT(sbi)->cur_data_blkoff[i]);
+-			else
+-				valid_sum_count += curseg_blkoff(sbi, i);
+-		}
+-	}
+-
+-	sum_in_page = (PAGE_SIZE - 2 * SUM_JOURNAL_SIZE -
+-			SUM_FOOTER_SIZE) / SUMMARY_SIZE;
+-	if (valid_sum_count <= sum_in_page)
+-		return 1;
+-	else if ((valid_sum_count - sum_in_page) <=
+-		(PAGE_SIZE - SUM_FOOTER_SIZE) / SUMMARY_SIZE)
+-		return 2;
+-	return 3;
+-}
+-
+-/*
+- * Caller should put this summary page
+- */
+-struct page *get_sum_page(struct f2fs_sb_info *sbi, unsigned int segno)
+-{
+-	return get_meta_page(sbi, GET_SUM_BLOCK(sbi, segno));
+-}
+-
+-void update_meta_page(struct f2fs_sb_info *sbi, void *src, block_t blk_addr)
+-{
+-	struct page *page = grab_meta_page(sbi, blk_addr);
+-	void *dst = page_address(page);
+-
+-	if (src)
+-		memcpy(dst, src, PAGE_SIZE);
+-	else
+-		memset(dst, 0, PAGE_SIZE);
+-	set_page_dirty(page);
+-	f2fs_put_page(page, 1);
+-}
+-
+-static void write_sum_page(struct f2fs_sb_info *sbi,
+-			struct f2fs_summary_block *sum_blk, block_t blk_addr)
+-{
+-	update_meta_page(sbi, (void *)sum_blk, blk_addr);
+-}
+-
+-static void write_current_sum_page(struct f2fs_sb_info *sbi,
+-						int type, block_t blk_addr)
+-{
+-	struct curseg_info *curseg = CURSEG_I(sbi, type);
+-	struct page *page = grab_meta_page(sbi, blk_addr);
+-	struct f2fs_summary_block *src = curseg->sum_blk;
+-	struct f2fs_summary_block *dst;
+-
+-	dst = (struct f2fs_summary_block *)page_address(page);
+-
+-	mutex_lock(&curseg->curseg_mutex);
+-
+-	down_read(&curseg->journal_rwsem);
+-	memcpy(&dst->journal, curseg->journal, SUM_JOURNAL_SIZE);
+-	up_read(&curseg->journal_rwsem);
+-
+-	memcpy(dst->entries, src->entries, SUM_ENTRY_SIZE);
+-	memcpy(&dst->footer, &src->footer, SUM_FOOTER_SIZE);
+-
+-	mutex_unlock(&curseg->curseg_mutex);
+-
+-	set_page_dirty(page);
+-	f2fs_put_page(page, 1);
+-}
+-
+-static int is_next_segment_free(struct f2fs_sb_info *sbi, int type)
+-{
+-	struct curseg_info *curseg = CURSEG_I(sbi, type);
+-	unsigned int segno = curseg->segno + 1;
+-	struct free_segmap_info *free_i = FREE_I(sbi);
+-
+-	if (segno < MAIN_SEGS(sbi) && segno % sbi->segs_per_sec)
+-		return !test_bit(segno, free_i->free_segmap);
+-	return 0;
+-}
+-
+-/*
+- * Find a new segment from the free segments bitmap to right order
+- * This function should be returned with success, otherwise BUG
+- */
+-static void get_new_segment(struct f2fs_sb_info *sbi,
+-			unsigned int *newseg, bool new_sec, int dir)
+-{
+-	struct free_segmap_info *free_i = FREE_I(sbi);
+-	unsigned int segno, secno, zoneno;
+-	unsigned int total_zones = MAIN_SECS(sbi) / sbi->secs_per_zone;
+-	unsigned int hint = GET_SEC_FROM_SEG(sbi, *newseg);
+-	unsigned int old_zoneno = GET_ZONE_FROM_SEG(sbi, *newseg);
+-	unsigned int left_start = hint;
+-	bool init = true;
+-	int go_left = 0;
+-	int i;
+-
+-	spin_lock(&free_i->segmap_lock);
+-
+-	if (!new_sec && ((*newseg + 1) % sbi->segs_per_sec)) {
+-		segno = find_next_zero_bit(free_i->free_segmap,
+-			GET_SEG_FROM_SEC(sbi, hint + 1), *newseg + 1);
+-		if (segno < GET_SEG_FROM_SEC(sbi, hint + 1))
+-			goto got_it;
+-	}
+-find_other_zone:
+-	secno = find_next_zero_bit(free_i->free_secmap, MAIN_SECS(sbi), hint);
+-	if (secno >= MAIN_SECS(sbi)) {
+-		if (dir == ALLOC_RIGHT) {
+-			secno = find_next_zero_bit(free_i->free_secmap,
+-							MAIN_SECS(sbi), 0);
+-			f2fs_bug_on(sbi, secno >= MAIN_SECS(sbi));
+-		} else {
+-			go_left = 1;
+-			left_start = hint - 1;
+-		}
+-	}
+-	if (go_left == 0)
+-		goto skip_left;
+-
+-	while (test_bit(left_start, free_i->free_secmap)) {
+-		if (left_start > 0) {
+-			left_start--;
+-			continue;
+-		}
+-		left_start = find_next_zero_bit(free_i->free_secmap,
+-							MAIN_SECS(sbi), 0);
+-		f2fs_bug_on(sbi, left_start >= MAIN_SECS(sbi));
+-		break;
+-	}
+-	secno = left_start;
+-skip_left:
+-	hint = secno;
+-	segno = GET_SEG_FROM_SEC(sbi, secno);
+-	zoneno = GET_ZONE_FROM_SEC(sbi, secno);
+-
+-	/* give up on finding another zone */
+-	if (!init)
+-		goto got_it;
+-	if (sbi->secs_per_zone == 1)
+-		goto got_it;
+-	if (zoneno == old_zoneno)
+-		goto got_it;
+-	if (dir == ALLOC_LEFT) {
+-		if (!go_left && zoneno + 1 >= total_zones)
+-			goto got_it;
+-		if (go_left && zoneno == 0)
+-			goto got_it;
+-	}
+-	for (i = 0; i < NR_CURSEG_TYPE; i++)
+-		if (CURSEG_I(sbi, i)->zone == zoneno)
+-			break;
+-
+-	if (i < NR_CURSEG_TYPE) {
+-		/* zone is in user, try another */
+-		if (go_left)
+-			hint = zoneno * sbi->secs_per_zone - 1;
+-		else if (zoneno + 1 >= total_zones)
+-			hint = 0;
+-		else
+-			hint = (zoneno + 1) * sbi->secs_per_zone;
+-		init = false;
+-		goto find_other_zone;
+-	}
+-got_it:
+-	/* set it as dirty segment in free segmap */
+-	f2fs_bug_on(sbi, test_bit(segno, free_i->free_segmap));
+-	__set_inuse(sbi, segno);
+-	*newseg = segno;
+-	spin_unlock(&free_i->segmap_lock);
+-}
+-
+-static void reset_curseg(struct f2fs_sb_info *sbi, int type, int modified)
+-{
+-	struct curseg_info *curseg = CURSEG_I(sbi, type);
+-	struct summary_footer *sum_footer;
+-
+-	curseg->segno = curseg->next_segno;
+-	curseg->zone = GET_ZONE_FROM_SEG(sbi, curseg->segno);
+-	curseg->next_blkoff = 0;
+-	curseg->next_segno = NULL_SEGNO;
+-
+-	sum_footer = &(curseg->sum_blk->footer);
+-	memset(sum_footer, 0, sizeof(struct summary_footer));
+-	if (IS_DATASEG(type))
+-		SET_SUM_TYPE(sum_footer, SUM_TYPE_DATA);
+-	if (IS_NODESEG(type))
+-		SET_SUM_TYPE(sum_footer, SUM_TYPE_NODE);
+-	__set_sit_entry_type(sbi, type, curseg->segno, modified);
+-}
+-
+-static unsigned int __get_next_segno(struct f2fs_sb_info *sbi, int type)
+-{
+-	/* if segs_per_sec is large than 1, we need to keep original policy. */
+-	if (sbi->segs_per_sec != 1)
+-		return CURSEG_I(sbi, type)->segno;
+-
+-	if (type == CURSEG_HOT_DATA || IS_NODESEG(type))
+-		return 0;
+-
+-	if (SIT_I(sbi)->last_victim[ALLOC_NEXT])
+-		return SIT_I(sbi)->last_victim[ALLOC_NEXT];
+-	return CURSEG_I(sbi, type)->segno;
+-}
+-
+-/*
+- * Allocate a current working segment.
+- * This function always allocates a free segment in LFS manner.
+- */
+-static void new_curseg(struct f2fs_sb_info *sbi, int type, bool new_sec)
+-{
+-	struct curseg_info *curseg = CURSEG_I(sbi, type);
+-	unsigned int segno = curseg->segno;
+-	int dir = ALLOC_LEFT;
+-
+-	write_sum_page(sbi, curseg->sum_blk,
+-				GET_SUM_BLOCK(sbi, segno));
+-	if (type == CURSEG_WARM_DATA || type == CURSEG_COLD_DATA)
+-		dir = ALLOC_RIGHT;
+-
+-	if (test_opt(sbi, NOHEAP))
+-		dir = ALLOC_RIGHT;
+-
+-	segno = __get_next_segno(sbi, type);
+-	get_new_segment(sbi, &segno, new_sec, dir);
+-	curseg->next_segno = segno;
+-	reset_curseg(sbi, type, 1);
+-	curseg->alloc_type = LFS;
+-}
+-
+-static void __next_free_blkoff(struct f2fs_sb_info *sbi,
+-			struct curseg_info *seg, block_t start)
+-{
+-	struct seg_entry *se = get_seg_entry(sbi, seg->segno);
+-	int entries = SIT_VBLOCK_MAP_SIZE / sizeof(unsigned long);
+-	unsigned long *target_map = SIT_I(sbi)->tmp_map;
+-	unsigned long *ckpt_map = (unsigned long *)se->ckpt_valid_map;
+-	unsigned long *cur_map = (unsigned long *)se->cur_valid_map;
+-	int i, pos;
+-
+-	for (i = 0; i < entries; i++)
+-		target_map[i] = ckpt_map[i] | cur_map[i];
+-
+-	pos = __find_rev_next_zero_bit(target_map, sbi->blocks_per_seg, start);
+-
+-	seg->next_blkoff = pos;
+-}
+-
+-/*
+- * If a segment is written by LFS manner, next block offset is just obtained
+- * by increasing the current block offset. However, if a segment is written by
+- * SSR manner, next block offset obtained by calling __next_free_blkoff
+- */
+-static void __refresh_next_blkoff(struct f2fs_sb_info *sbi,
+-				struct curseg_info *seg)
+-{
+-	if (seg->alloc_type == SSR)
+-		__next_free_blkoff(sbi, seg, seg->next_blkoff + 1);
+-	else
+-		seg->next_blkoff++;
+-}
+-
+-/*
+- * This function always allocates a used segment(from dirty seglist) by SSR
+- * manner, so it should recover the existing segment information of valid blocks
+- */
+-static void change_curseg(struct f2fs_sb_info *sbi, int type, bool reuse)
+-{
+-	struct dirty_seglist_info *dirty_i = DIRTY_I(sbi);
+-	struct curseg_info *curseg = CURSEG_I(sbi, type);
+-	unsigned int new_segno = curseg->next_segno;
+-	struct f2fs_summary_block *sum_node;
+-	struct page *sum_page;
+-
+-	write_sum_page(sbi, curseg->sum_blk,
+-				GET_SUM_BLOCK(sbi, curseg->segno));
+-	__set_test_and_inuse(sbi, new_segno);
+-
+-	mutex_lock(&dirty_i->seglist_lock);
+-	__remove_dirty_segment(sbi, new_segno, PRE);
+-	__remove_dirty_segment(sbi, new_segno, DIRTY);
+-	mutex_unlock(&dirty_i->seglist_lock);
+-
+-	reset_curseg(sbi, type, 1);
+-	curseg->alloc_type = SSR;
+-	__next_free_blkoff(sbi, curseg, 0);
+-
+-	if (reuse) {
+-		sum_page = get_sum_page(sbi, new_segno);
+-		sum_node = (struct f2fs_summary_block *)page_address(sum_page);
+-		memcpy(curseg->sum_blk, sum_node, SUM_ENTRY_SIZE);
+-		f2fs_put_page(sum_page, 1);
+-	}
+-}
+-
+-static int get_ssr_segment(struct f2fs_sb_info *sbi, int type)
+-{
+-	struct curseg_info *curseg = CURSEG_I(sbi, type);
+-	const struct victim_selection *v_ops = DIRTY_I(sbi)->v_ops;
+-	unsigned segno = NULL_SEGNO;
+-	int i, cnt;
+-	bool reversed = false;
+-
+-	/* need_SSR() already forces to do this */
+-	if (v_ops->get_victim(sbi, &segno, BG_GC, type, SSR)) {
+-		curseg->next_segno = segno;
+-		return 1;
+-	}
+-
+-	/* For node segments, let's do SSR more intensively */
+-	if (IS_NODESEG(type)) {
+-		if (type >= CURSEG_WARM_NODE) {
+-			reversed = true;
+-			i = CURSEG_COLD_NODE;
+-		} else {
+-			i = CURSEG_HOT_NODE;
+-		}
+-		cnt = NR_CURSEG_NODE_TYPE;
+-	} else {
+-		if (type >= CURSEG_WARM_DATA) {
+-			reversed = true;
+-			i = CURSEG_COLD_DATA;
+-		} else {
+-			i = CURSEG_HOT_DATA;
+-		}
+-		cnt = NR_CURSEG_DATA_TYPE;
+-	}
+-
+-	for (; cnt-- > 0; reversed ? i-- : i++) {
+-		if (i == type)
+-			continue;
+-		if (v_ops->get_victim(sbi, &segno, BG_GC, i, SSR)) {
+-			curseg->next_segno = segno;
+-			return 1;
+-		}
+-	}
+-	return 0;
+-}
+-
+-/*
+- * flush out current segment and replace it with new segment
+- * This function should be returned with success, otherwise BUG
+- */
+-static void allocate_segment_by_default(struct f2fs_sb_info *sbi,
+-						int type, bool force)
+-{
+-	struct curseg_info *curseg = CURSEG_I(sbi, type);
+-
+-	if (force)
+-		new_curseg(sbi, type, true);
+-	else if (!is_set_ckpt_flags(sbi, CP_CRC_RECOVERY_FLAG) &&
+-					type == CURSEG_WARM_NODE)
+-		new_curseg(sbi, type, false);
+-	else if (curseg->alloc_type == LFS && is_next_segment_free(sbi, type))
+-		new_curseg(sbi, type, false);
+-	else if (need_SSR(sbi) && get_ssr_segment(sbi, type))
+-		change_curseg(sbi, type, true);
+-	else
+-		new_curseg(sbi, type, false);
+-
+-	stat_inc_seg_type(sbi, curseg);
+-}
+-
+-void allocate_new_segments(struct f2fs_sb_info *sbi)
+-{
+-	struct curseg_info *curseg;
+-	unsigned int old_segno;
+-	int i;
+-
+-	for (i = CURSEG_HOT_DATA; i <= CURSEG_COLD_DATA; i++) {
+-		curseg = CURSEG_I(sbi, i);
+-		old_segno = curseg->segno;
+-		SIT_I(sbi)->s_ops->allocate_segment(sbi, i, true);
+-		locate_dirty_segment(sbi, old_segno);
+-	}
+-}
+-
+-static const struct segment_allocation default_salloc_ops = {
+-	.allocate_segment = allocate_segment_by_default,
+-};
+-
+-bool exist_trim_candidates(struct f2fs_sb_info *sbi, struct cp_control *cpc)
+-{
+-	__u64 trim_start = cpc->trim_start;
+-	bool has_candidate = false;
+-
+-	mutex_lock(&SIT_I(sbi)->sentry_lock);
+-	for (; cpc->trim_start <= cpc->trim_end; cpc->trim_start++) {
+-		if (add_discard_addrs(sbi, cpc, true)) {
+-			has_candidate = true;
+-			break;
+-		}
+-	}
+-	mutex_unlock(&SIT_I(sbi)->sentry_lock);
+-
+-	cpc->trim_start = trim_start;
+-	return has_candidate;
+-}
+-
+-int f2fs_trim_fs(struct f2fs_sb_info *sbi, struct fstrim_range *range)
+-{
+-	__u64 start = F2FS_BYTES_TO_BLK(range->start);
+-	__u64 end = start + F2FS_BYTES_TO_BLK(range->len) - 1;
+-	unsigned int start_segno, end_segno;
+-	struct cp_control cpc;
+-	int err = 0;
+-
+-	if (start >= MAX_BLKADDR(sbi) || range->len < sbi->blocksize)
+-		return -EINVAL;
+-
+-	cpc.trimmed = 0;
+-	if (end <= MAIN_BLKADDR(sbi))
+-		goto out;
+-
+-	if (is_sbi_flag_set(sbi, SBI_NEED_FSCK)) {
+-		f2fs_msg(sbi->sb, KERN_WARNING,
+-			"Found FS corruption, run fsck to fix.");
+-		goto out;
+-	}
+-
+-	/* start/end segment number in main_area */
+-	start_segno = (start <= MAIN_BLKADDR(sbi)) ? 0 : GET_SEGNO(sbi, start);
+-	end_segno = (end >= MAX_BLKADDR(sbi)) ? MAIN_SEGS(sbi) - 1 :
+-						GET_SEGNO(sbi, end);
+-	cpc.reason = CP_DISCARD;
+-	cpc.trim_minlen = max_t(__u64, 1, F2FS_BYTES_TO_BLK(range->minlen));
+-
+-	/* do checkpoint to issue discard commands safely */
+-	for (; start_segno <= end_segno; start_segno = cpc.trim_end + 1) {
+-		cpc.trim_start = start_segno;
+-
+-		if (sbi->discard_blks == 0)
+-			break;
+-		else if (sbi->discard_blks < BATCHED_TRIM_BLOCKS(sbi))
+-			cpc.trim_end = end_segno;
+-		else
+-			cpc.trim_end = min_t(unsigned int,
+-				rounddown(start_segno +
+-				BATCHED_TRIM_SEGMENTS(sbi),
+-				sbi->segs_per_sec) - 1, end_segno);
+-
+-		mutex_lock(&sbi->gc_mutex);
+-		err = write_checkpoint(sbi, &cpc);
+-		mutex_unlock(&sbi->gc_mutex);
+-		if (err)
+-			break;
+-
+-		schedule();
+-	}
+-out:
+-	range->len = F2FS_BLK_TO_BYTES(cpc.trimmed);
+-	return err;
+-}
+-
+-static bool __has_curseg_space(struct f2fs_sb_info *sbi, int type)
+-{
+-	struct curseg_info *curseg = CURSEG_I(sbi, type);
+-	if (curseg->next_blkoff < sbi->blocks_per_seg)
+-		return true;
+-	return false;
+-}
+-
+-static int __get_segment_type_2(struct page *page, enum page_type p_type)
+-{
+-	if (p_type == DATA)
+-		return CURSEG_HOT_DATA;
+-	else
+-		return CURSEG_HOT_NODE;
+-}
+-
+-static int __get_segment_type_4(struct page *page, enum page_type p_type)
+-{
+-	if (p_type == DATA) {
+-		struct inode *inode = page->mapping->host;
+-
+-		if (S_ISDIR(inode->i_mode))
+-			return CURSEG_HOT_DATA;
+-		else
+-			return CURSEG_COLD_DATA;
+-	} else {
+-		if (IS_DNODE(page) && is_cold_node(page))
+-			return CURSEG_WARM_NODE;
+-		else
+-			return CURSEG_COLD_NODE;
+-	}
+-}
+-
+-static int __get_segment_type_6(struct page *page, enum page_type p_type)
+-{
+-	if (p_type == DATA) {
+-		struct inode *inode = page->mapping->host;
+-
+-		if (is_cold_data(page) || file_is_cold(inode))
+-			return CURSEG_COLD_DATA;
+-		if (is_inode_flag_set(inode, FI_HOT_DATA))
+-			return CURSEG_HOT_DATA;
+-		return CURSEG_WARM_DATA;
+-	} else {
+-		if (IS_DNODE(page))
+-			return is_cold_node(page) ? CURSEG_WARM_NODE :
+-						CURSEG_HOT_NODE;
+-		return CURSEG_COLD_NODE;
+-	}
+-}
+-
+-static int __get_segment_type(struct page *page, enum page_type p_type)
+-{
+-	switch (F2FS_P_SB(page)->active_logs) {
+-	case 2:
+-		return __get_segment_type_2(page, p_type);
+-	case 4:
+-		return __get_segment_type_4(page, p_type);
+-	}
+-	/* NR_CURSEG_TYPE(6) logs by default */
+-	f2fs_bug_on(F2FS_P_SB(page),
+-		F2FS_P_SB(page)->active_logs != NR_CURSEG_TYPE);
+-	return __get_segment_type_6(page, p_type);
+-}
+-
+-void allocate_data_block(struct f2fs_sb_info *sbi, struct page *page,
+-		block_t old_blkaddr, block_t *new_blkaddr,
+-		struct f2fs_summary *sum, int type)
+-{
+-	struct sit_info *sit_i = SIT_I(sbi);
+-	struct curseg_info *curseg = CURSEG_I(sbi, type);
+-
+-	mutex_lock(&curseg->curseg_mutex);
+-	mutex_lock(&sit_i->sentry_lock);
+-
+-	*new_blkaddr = NEXT_FREE_BLKADDR(sbi, curseg);
+-
+-	f2fs_wait_discard_bio(sbi, *new_blkaddr);
+-
+-	/*
+-	 * __add_sum_entry should be resided under the curseg_mutex
+-	 * because, this function updates a summary entry in the
+-	 * current summary block.
+-	 */
+-	__add_sum_entry(sbi, type, sum);
+-
+-	__refresh_next_blkoff(sbi, curseg);
+-
+-	stat_inc_block_count(sbi, curseg);
+-
+-	if (!__has_curseg_space(sbi, type))
+-		sit_i->s_ops->allocate_segment(sbi, type, false);
+-	/*
+-	 * SIT information should be updated after segment allocation,
+-	 * since we need to keep dirty segments precisely under SSR.
+-	 */
+-	refresh_sit_entry(sbi, old_blkaddr, *new_blkaddr);
+-
+-	mutex_unlock(&sit_i->sentry_lock);
+-
+-	if (page && IS_NODESEG(type))
+-		fill_node_footer_blkaddr(page, NEXT_FREE_BLKADDR(sbi, curseg));
+-
+-	mutex_unlock(&curseg->curseg_mutex);
+-}
+-
+-static void do_write_page(struct f2fs_summary *sum, struct f2fs_io_info *fio)
+-{
+-	int type = __get_segment_type(fio->page, fio->type);
+-	int err;
+-
+-	if (fio->type == NODE || fio->type == DATA)
+-		mutex_lock(&fio->sbi->wio_mutex[fio->type]);
+-reallocate:
+-	allocate_data_block(fio->sbi, fio->page, fio->old_blkaddr,
+-					&fio->new_blkaddr, sum, type);
+-
+-	/* writeout dirty page into bdev */
+-	err = f2fs_submit_page_mbio(fio);
+-	if (err == -EAGAIN) {
+-		fio->old_blkaddr = fio->new_blkaddr;
+-		goto reallocate;
+-	}
+-
+-	if (fio->type == NODE || fio->type == DATA)
+-		mutex_unlock(&fio->sbi->wio_mutex[fio->type]);
+-}
+-
+-void write_meta_page(struct f2fs_sb_info *sbi, struct page *page)
+-{
+-	struct f2fs_io_info fio = {
+-		.sbi = sbi,
+-		.type = META,
+-		.op = REQ_OP_WRITE,
+-		.op_flags = REQ_SYNC | REQ_NOIDLE | REQ_META | REQ_PRIO,
+-		.old_blkaddr = page->index,
+-		.new_blkaddr = page->index,
+-		.page = page,
+-		.encrypted_page = NULL,
+-	};
+-
+-	if (unlikely(page->index >= MAIN_BLKADDR(sbi)))
+-		fio.op_flags &= ~REQ_META;
+-
+-	set_page_writeback(page);
+-	f2fs_submit_page_mbio(&fio);
+-}
+-
+-void write_node_page(unsigned int nid, struct f2fs_io_info *fio)
+-{
+-	struct f2fs_summary sum;
+-
+-	set_summary(&sum, nid, 0, 0);
+-	do_write_page(&sum, fio);
+-}
+-
+-void write_data_page(struct dnode_of_data *dn, struct f2fs_io_info *fio)
+-{
+-	struct f2fs_sb_info *sbi = fio->sbi;
+-	struct f2fs_summary sum;
+-	struct node_info ni;
+-
+-	f2fs_bug_on(sbi, dn->data_blkaddr == NULL_ADDR);
+-	get_node_info(sbi, dn->nid, &ni);
+-	set_summary(&sum, dn->nid, dn->ofs_in_node, ni.version);
+-	do_write_page(&sum, fio);
+-	f2fs_update_data_blkaddr(dn, fio->new_blkaddr);
+-}
+-
+-int rewrite_data_page(struct f2fs_io_info *fio)
+-{
+-	fio->new_blkaddr = fio->old_blkaddr;
+-	stat_inc_inplace_blocks(fio->sbi);
+-	return f2fs_submit_page_bio(fio);
+-}
+-
+-void __f2fs_replace_block(struct f2fs_sb_info *sbi, struct f2fs_summary *sum,
+-				block_t old_blkaddr, block_t new_blkaddr,
+-				bool recover_curseg, bool recover_newaddr)
+-{
+-	struct sit_info *sit_i = SIT_I(sbi);
+-	struct curseg_info *curseg;
+-	unsigned int segno, old_cursegno;
+-	struct seg_entry *se;
+-	int type;
+-	unsigned short old_blkoff;
+-
+-	segno = GET_SEGNO(sbi, new_blkaddr);
+-	se = get_seg_entry(sbi, segno);
+-	type = se->type;
+-
+-	if (!recover_curseg) {
+-		/* for recovery flow */
+-		if (se->valid_blocks == 0 && !IS_CURSEG(sbi, segno)) {
+-			if (old_blkaddr == NULL_ADDR)
+-				type = CURSEG_COLD_DATA;
+-			else
+-				type = CURSEG_WARM_DATA;
+-		}
+-	} else {
+-		if (!IS_CURSEG(sbi, segno))
+-			type = CURSEG_WARM_DATA;
+-	}
+-
+-	curseg = CURSEG_I(sbi, type);
+-
+-	mutex_lock(&curseg->curseg_mutex);
+-	mutex_lock(&sit_i->sentry_lock);
+-
+-	old_cursegno = curseg->segno;
+-	old_blkoff = curseg->next_blkoff;
+-
+-	/* change the current segment */
+-	if (segno != curseg->segno) {
+-		curseg->next_segno = segno;
+-		change_curseg(sbi, type, true);
+-	}
+-
+-	curseg->next_blkoff = GET_BLKOFF_FROM_SEG0(sbi, new_blkaddr);
+-	__add_sum_entry(sbi, type, sum);
+-
+-	if (!recover_curseg || recover_newaddr)
+-		update_sit_entry(sbi, new_blkaddr, 1);
+-	if (GET_SEGNO(sbi, old_blkaddr) != NULL_SEGNO)
+-		update_sit_entry(sbi, old_blkaddr, -1);
+-
+-	locate_dirty_segment(sbi, GET_SEGNO(sbi, old_blkaddr));
+-	locate_dirty_segment(sbi, GET_SEGNO(sbi, new_blkaddr));
+-
+-	locate_dirty_segment(sbi, old_cursegno);
+-
+-	if (recover_curseg) {
+-		if (old_cursegno != curseg->segno) {
+-			curseg->next_segno = old_cursegno;
+-			change_curseg(sbi, type, true);
+-		}
+-		curseg->next_blkoff = old_blkoff;
+-	}
+-
+-	mutex_unlock(&sit_i->sentry_lock);
+-	mutex_unlock(&curseg->curseg_mutex);
+-}
+-
+-void f2fs_replace_block(struct f2fs_sb_info *sbi, struct dnode_of_data *dn,
+-				block_t old_addr, block_t new_addr,
+-				unsigned char version, bool recover_curseg,
+-				bool recover_newaddr)
+-{
+-	struct f2fs_summary sum;
+-
+-	set_summary(&sum, dn->nid, dn->ofs_in_node, version);
+-
+-	__f2fs_replace_block(sbi, &sum, old_addr, new_addr,
+-					recover_curseg, recover_newaddr);
+-
+-	f2fs_update_data_blkaddr(dn, new_addr);
+-}
+-
+-void f2fs_wait_on_page_writeback(struct page *page,
+-				enum page_type type, bool ordered)
+-{
+-	if (PageWriteback(page)) {
+-		struct f2fs_sb_info *sbi = F2FS_P_SB(page);
+-
+-		f2fs_submit_merged_bio_cond(sbi, page->mapping->host,
+-						0, page->index, type, WRITE);
+-		if (ordered)
+-			wait_on_page_writeback(page);
+-		else
+-			/* wait_for_stable_page(page) doesn't support */
+-			wait_on_page_writeback(page);
+-	}
+-}
+-
+-void f2fs_wait_on_encrypted_page_writeback(struct f2fs_sb_info *sbi,
+-							block_t blkaddr)
+-{
+-	struct page *cpage;
+-
+-	if (blkaddr == NEW_ADDR || blkaddr == NULL_ADDR)
+-		return;
+-
+-	cpage = find_lock_page(META_MAPPING(sbi), blkaddr);
+-	if (cpage) {
+-		f2fs_wait_on_page_writeback(cpage, DATA, true);
+-		f2fs_put_page(cpage, 1);
+-	}
+-}
+-
+-static int read_compacted_summaries(struct f2fs_sb_info *sbi)
+-{
+-	struct f2fs_checkpoint *ckpt = F2FS_CKPT(sbi);
+-	struct curseg_info *seg_i;
+-	unsigned char *kaddr;
+-	struct page *page;
+-	block_t start;
+-	int i, j, offset;
+-
+-	start = start_sum_block(sbi);
+-
+-	page = get_meta_page(sbi, start++);
+-	kaddr = (unsigned char *)page_address(page);
+-
+-	/* Step 1: restore nat cache */
+-	seg_i = CURSEG_I(sbi, CURSEG_HOT_DATA);
+-	memcpy(seg_i->journal, kaddr, SUM_JOURNAL_SIZE);
+-
+-	/* Step 2: restore sit cache */
+-	seg_i = CURSEG_I(sbi, CURSEG_COLD_DATA);
+-	memcpy(seg_i->journal, kaddr + SUM_JOURNAL_SIZE, SUM_JOURNAL_SIZE);
+-	offset = 2 * SUM_JOURNAL_SIZE;
+-
+-	/* Step 3: restore summary entries */
+-	for (i = CURSEG_HOT_DATA; i <= CURSEG_COLD_DATA; i++) {
+-		unsigned short blk_off;
+-		unsigned int segno;
+-
+-		seg_i = CURSEG_I(sbi, i);
+-		segno = le32_to_cpu(ckpt->cur_data_segno[i]);
+-		blk_off = le16_to_cpu(ckpt->cur_data_blkoff[i]);
+-		seg_i->next_segno = segno;
+-		reset_curseg(sbi, i, 0);
+-		seg_i->alloc_type = ckpt->alloc_type[i];
+-		seg_i->next_blkoff = blk_off;
+-
+-		if (seg_i->alloc_type == SSR)
+-			blk_off = sbi->blocks_per_seg;
+-
+-		for (j = 0; j < blk_off; j++) {
+-			struct f2fs_summary *s;
+-			s = (struct f2fs_summary *)(kaddr + offset);
+-			seg_i->sum_blk->entries[j] = *s;
+-			offset += SUMMARY_SIZE;
+-			if (offset + SUMMARY_SIZE <= PAGE_SIZE -
+-						SUM_FOOTER_SIZE)
+-				continue;
+-
+-			f2fs_put_page(page, 1);
+-			page = NULL;
+-
+-			page = get_meta_page(sbi, start++);
+-			kaddr = (unsigned char *)page_address(page);
+-			offset = 0;
+-		}
+-	}
+-	f2fs_put_page(page, 1);
+-	return 0;
+-}
+-
+-static int read_normal_summaries(struct f2fs_sb_info *sbi, int type)
+-{
+-	struct f2fs_checkpoint *ckpt = F2FS_CKPT(sbi);
+-	struct f2fs_summary_block *sum;
+-	struct curseg_info *curseg;
+-	struct page *new;
+-	unsigned short blk_off;
+-	unsigned int segno = 0;
+-	block_t blk_addr = 0;
+-
+-	/* get segment number and block addr */
+-	if (IS_DATASEG(type)) {
+-		segno = le32_to_cpu(ckpt->cur_data_segno[type]);
+-		blk_off = le16_to_cpu(ckpt->cur_data_blkoff[type -
+-							CURSEG_HOT_DATA]);
+-		if (__exist_node_summaries(sbi))
+-			blk_addr = sum_blk_addr(sbi, NR_CURSEG_TYPE, type);
+-		else
+-			blk_addr = sum_blk_addr(sbi, NR_CURSEG_DATA_TYPE, type);
+-	} else {
+-		segno = le32_to_cpu(ckpt->cur_node_segno[type -
+-							CURSEG_HOT_NODE]);
+-		blk_off = le16_to_cpu(ckpt->cur_node_blkoff[type -
+-							CURSEG_HOT_NODE]);
+-		if (__exist_node_summaries(sbi))
+-			blk_addr = sum_blk_addr(sbi, NR_CURSEG_NODE_TYPE,
+-							type - CURSEG_HOT_NODE);
+-		else
+-			blk_addr = GET_SUM_BLOCK(sbi, segno);
+-	}
+-
+-	new = get_meta_page(sbi, blk_addr);
+-	sum = (struct f2fs_summary_block *)page_address(new);
+-
+-	if (IS_NODESEG(type)) {
+-		if (__exist_node_summaries(sbi)) {
+-			struct f2fs_summary *ns = &sum->entries[0];
+-			int i;
+-			for (i = 0; i < sbi->blocks_per_seg; i++, ns++) {
+-				ns->version = 0;
+-				ns->ofs_in_node = 0;
+-			}
+-		} else {
+-			int err;
+-
+-			err = restore_node_summary(sbi, segno, sum);
+-			if (err) {
+-				f2fs_put_page(new, 1);
+-				return err;
+-			}
+-		}
+-	}
+-
+-	/* set uncompleted segment to curseg */
+-	curseg = CURSEG_I(sbi, type);
+-	mutex_lock(&curseg->curseg_mutex);
+-
+-	/* update journal info */
+-	down_write(&curseg->journal_rwsem);
+-	memcpy(curseg->journal, &sum->journal, SUM_JOURNAL_SIZE);
+-	up_write(&curseg->journal_rwsem);
+-
+-	memcpy(curseg->sum_blk->entries, sum->entries, SUM_ENTRY_SIZE);
+-	memcpy(&curseg->sum_blk->footer, &sum->footer, SUM_FOOTER_SIZE);
+-	curseg->next_segno = segno;
+-	reset_curseg(sbi, type, 0);
+-	curseg->alloc_type = ckpt->alloc_type[type];
+-	curseg->next_blkoff = blk_off;
+-	mutex_unlock(&curseg->curseg_mutex);
+-	f2fs_put_page(new, 1);
+-	return 0;
+-}
+-
+-static int restore_curseg_summaries(struct f2fs_sb_info *sbi)
+-{
+-	int type = CURSEG_HOT_DATA;
+-	int err;
+-
+-	if (is_set_ckpt_flags(sbi, CP_COMPACT_SUM_FLAG)) {
+-		int npages = npages_for_summary_flush(sbi, true);
+-
+-		if (npages >= 2)
+-			ra_meta_pages(sbi, start_sum_block(sbi), npages,
+-							META_CP, true);
+-
+-		/* restore for compacted data summary */
+-		if (read_compacted_summaries(sbi))
+-			return -EINVAL;
+-		type = CURSEG_HOT_NODE;
+-	}
+-
+-	if (__exist_node_summaries(sbi))
+-		ra_meta_pages(sbi, sum_blk_addr(sbi, NR_CURSEG_TYPE, type),
+-					NR_CURSEG_TYPE - type, META_CP, true);
+-
+-	for (; type <= CURSEG_COLD_NODE; type++) {
+-		err = read_normal_summaries(sbi, type);
+-		if (err)
+-			return err;
+-	}
+-
+-	return 0;
+-}
+-
+-static void write_compacted_summaries(struct f2fs_sb_info *sbi, block_t blkaddr)
+-{
+-	struct page *page;
+-	unsigned char *kaddr;
+-	struct f2fs_summary *summary;
+-	struct curseg_info *seg_i;
+-	int written_size = 0;
+-	int i, j;
+-
+-	page = grab_meta_page(sbi, blkaddr++);
+-	kaddr = (unsigned char *)page_address(page);
+-
+-	/* Step 1: write nat cache */
+-	seg_i = CURSEG_I(sbi, CURSEG_HOT_DATA);
+-	memcpy(kaddr, seg_i->journal, SUM_JOURNAL_SIZE);
+-	written_size += SUM_JOURNAL_SIZE;
+-
+-	/* Step 2: write sit cache */
+-	seg_i = CURSEG_I(sbi, CURSEG_COLD_DATA);
+-	memcpy(kaddr + written_size, seg_i->journal, SUM_JOURNAL_SIZE);
+-	written_size += SUM_JOURNAL_SIZE;
+-
+-	/* Step 3: write summary entries */
+-	for (i = CURSEG_HOT_DATA; i <= CURSEG_COLD_DATA; i++) {
+-		unsigned short blkoff;
+-		seg_i = CURSEG_I(sbi, i);
+-		if (sbi->ckpt->alloc_type[i] == SSR)
+-			blkoff = sbi->blocks_per_seg;
+-		else
+-			blkoff = curseg_blkoff(sbi, i);
+-
+-		for (j = 0; j < blkoff; j++) {
+-			if (!page) {
+-				page = grab_meta_page(sbi, blkaddr++);
+-				kaddr = (unsigned char *)page_address(page);
+-				written_size = 0;
+-			}
+-			summary = (struct f2fs_summary *)(kaddr + written_size);
+-			*summary = seg_i->sum_blk->entries[j];
+-			written_size += SUMMARY_SIZE;
+-
+-			if (written_size + SUMMARY_SIZE <= PAGE_SIZE -
+-							SUM_FOOTER_SIZE)
+-				continue;
+-
+-			set_page_dirty(page);
+-			f2fs_put_page(page, 1);
+-			page = NULL;
+-		}
+-	}
+-	if (page) {
+-		set_page_dirty(page);
+-		f2fs_put_page(page, 1);
+-	}
+-}
+-
+-static void write_normal_summaries(struct f2fs_sb_info *sbi,
+-					block_t blkaddr, int type)
+-{
+-	int i, end;
+-	if (IS_DATASEG(type))
+-		end = type + NR_CURSEG_DATA_TYPE;
+-	else
+-		end = type + NR_CURSEG_NODE_TYPE;
+-
+-	for (i = type; i < end; i++)
+-		write_current_sum_page(sbi, i, blkaddr + (i - type));
+-}
+-
+-void write_data_summaries(struct f2fs_sb_info *sbi, block_t start_blk)
+-{
+-	if (is_set_ckpt_flags(sbi, CP_COMPACT_SUM_FLAG))
+-		write_compacted_summaries(sbi, start_blk);
+-	else
+-		write_normal_summaries(sbi, start_blk, CURSEG_HOT_DATA);
+-}
+-
+-void write_node_summaries(struct f2fs_sb_info *sbi, block_t start_blk)
+-{
+-	write_normal_summaries(sbi, start_blk, CURSEG_HOT_NODE);
+-}
+-
+-int lookup_journal_in_cursum(struct f2fs_journal *journal, int type,
+-					unsigned int val, int alloc)
+-{
+-	int i;
+-
+-	if (type == NAT_JOURNAL) {
+-		for (i = 0; i < nats_in_cursum(journal); i++) {
+-			if (le32_to_cpu(nid_in_journal(journal, i)) == val)
+-				return i;
+-		}
+-		if (alloc && __has_cursum_space(journal, 1, NAT_JOURNAL))
+-			return update_nats_in_cursum(journal, 1);
+-	} else if (type == SIT_JOURNAL) {
+-		for (i = 0; i < sits_in_cursum(journal); i++)
+-			if (le32_to_cpu(segno_in_journal(journal, i)) == val)
+-				return i;
+-		if (alloc && __has_cursum_space(journal, 1, SIT_JOURNAL))
+-			return update_sits_in_cursum(journal, 1);
+-	}
+-	return -1;
+-}
+-
+-static struct page *get_current_sit_page(struct f2fs_sb_info *sbi,
+-					unsigned int segno)
+-{
+-	return get_meta_page(sbi, current_sit_addr(sbi, segno));
+-}
+-
+-static struct page *get_next_sit_page(struct f2fs_sb_info *sbi,
+-					unsigned int start)
+-{
+-	struct sit_info *sit_i = SIT_I(sbi);
+-	struct page *src_page, *dst_page;
+-	pgoff_t src_off, dst_off;
+-	void *src_addr, *dst_addr;
+-
+-	src_off = current_sit_addr(sbi, start);
+-	dst_off = next_sit_addr(sbi, src_off);
+-
+-	/* get current sit block page without lock */
+-	src_page = get_meta_page(sbi, src_off);
+-	dst_page = grab_meta_page(sbi, dst_off);
+-	f2fs_bug_on(sbi, PageDirty(src_page));
+-
+-	src_addr = page_address(src_page);
+-	dst_addr = page_address(dst_page);
+-	memcpy(dst_addr, src_addr, PAGE_SIZE);
+-
+-	set_page_dirty(dst_page);
+-	f2fs_put_page(src_page, 1);
+-
+-	set_to_next_sit(sit_i, start);
+-
+-	return dst_page;
+-}
+-
+-static struct sit_entry_set *grab_sit_entry_set(void)
+-{
+-	struct sit_entry_set *ses =
+-			f2fs_kmem_cache_alloc(sit_entry_set_slab, GFP_NOFS);
+-
+-	ses->entry_cnt = 0;
+-	INIT_LIST_HEAD(&ses->set_list);
+-	return ses;
+-}
+-
+-static void release_sit_entry_set(struct sit_entry_set *ses)
+-{
+-	list_del(&ses->set_list);
+-	kmem_cache_free(sit_entry_set_slab, ses);
+-}
+-
+-static void adjust_sit_entry_set(struct sit_entry_set *ses,
+-						struct list_head *head)
+-{
+-	struct sit_entry_set *next = ses;
+-
+-	if (list_is_last(&ses->set_list, head))
+-		return;
+-
+-	list_for_each_entry_continue(next, head, set_list)
+-		if (ses->entry_cnt <= next->entry_cnt)
+-			break;
+-
+-	list_move_tail(&ses->set_list, &next->set_list);
+-}
+-
+-static void add_sit_entry(unsigned int segno, struct list_head *head)
+-{
+-	struct sit_entry_set *ses;
+-	unsigned int start_segno = START_SEGNO(segno);
+-
+-	list_for_each_entry(ses, head, set_list) {
+-		if (ses->start_segno == start_segno) {
+-			ses->entry_cnt++;
+-			adjust_sit_entry_set(ses, head);
+-			return;
+-		}
+-	}
+-
+-	ses = grab_sit_entry_set();
+-
+-	ses->start_segno = start_segno;
+-	ses->entry_cnt++;
+-	list_add(&ses->set_list, head);
+-}
+-
+-static void add_sits_in_set(struct f2fs_sb_info *sbi)
+-{
+-	struct f2fs_sm_info *sm_info = SM_I(sbi);
+-	struct list_head *set_list = &sm_info->sit_entry_set;
+-	unsigned long *bitmap = SIT_I(sbi)->dirty_sentries_bitmap;
+-	unsigned int segno;
+-
+-	for_each_set_bit(segno, bitmap, MAIN_SEGS(sbi))
+-		add_sit_entry(segno, set_list);
+-}
+-
+-static void remove_sits_in_journal(struct f2fs_sb_info *sbi)
+-{
+-	struct curseg_info *curseg = CURSEG_I(sbi, CURSEG_COLD_DATA);
+-	struct f2fs_journal *journal = curseg->journal;
+-	int i;
+-
+-	down_write(&curseg->journal_rwsem);
+-	for (i = 0; i < sits_in_cursum(journal); i++) {
+-		unsigned int segno;
+-		bool dirtied;
+-
+-		segno = le32_to_cpu(segno_in_journal(journal, i));
+-		dirtied = __mark_sit_entry_dirty(sbi, segno);
+-
+-		if (!dirtied)
+-			add_sit_entry(segno, &SM_I(sbi)->sit_entry_set);
+-	}
+-	update_sits_in_cursum(journal, -i);
+-	up_write(&curseg->journal_rwsem);
+-}
+-
+-/*
+- * CP calls this function, which flushes SIT entries including sit_journal,
+- * and moves prefree segs to free segs.
+- */
+-void flush_sit_entries(struct f2fs_sb_info *sbi, struct cp_control *cpc)
+-{
+-	struct sit_info *sit_i = SIT_I(sbi);
+-	unsigned long *bitmap = sit_i->dirty_sentries_bitmap;
+-	struct curseg_info *curseg = CURSEG_I(sbi, CURSEG_COLD_DATA);
+-	struct f2fs_journal *journal = curseg->journal;
+-	struct sit_entry_set *ses, *tmp;
+-	struct list_head *head = &SM_I(sbi)->sit_entry_set;
+-	bool to_journal = true;
+-	struct seg_entry *se;
+-
+-	mutex_lock(&sit_i->sentry_lock);
+-
+-	if (!sit_i->dirty_sentries)
+-		goto out;
+-
+-	/*
+-	 * add and account sit entries of dirty bitmap in sit entry
+-	 * set temporarily
+-	 */
+-	add_sits_in_set(sbi);
+-
+-	/*
+-	 * if there are no enough space in journal to store dirty sit
+-	 * entries, remove all entries from journal and add and account
+-	 * them in sit entry set.
+-	 */
+-	if (!__has_cursum_space(journal, sit_i->dirty_sentries, SIT_JOURNAL))
+-		remove_sits_in_journal(sbi);
+-
+-	/*
+-	 * there are two steps to flush sit entries:
+-	 * #1, flush sit entries to journal in current cold data summary block.
+-	 * #2, flush sit entries to sit page.
+-	 */
+-	list_for_each_entry_safe(ses, tmp, head, set_list) {
+-		struct page *page = NULL;
+-		struct f2fs_sit_block *raw_sit = NULL;
+-		unsigned int start_segno = ses->start_segno;
+-		unsigned int end = min(start_segno + SIT_ENTRY_PER_BLOCK,
+-						(unsigned long)MAIN_SEGS(sbi));
+-		unsigned int segno = start_segno;
+-
+-		if (to_journal &&
+-			!__has_cursum_space(journal, ses->entry_cnt, SIT_JOURNAL))
+-			to_journal = false;
+-
+-		if (to_journal) {
+-			down_write(&curseg->journal_rwsem);
+-		} else {
+-			page = get_next_sit_page(sbi, start_segno);
+-			raw_sit = page_address(page);
+-		}
+-
+-		/* flush dirty sit entries in region of current sit set */
+-		for_each_set_bit_from(segno, bitmap, end) {
+-			int offset, sit_offset;
+-
+-			se = get_seg_entry(sbi, segno);
+-
+-			/* add discard candidates */
+-			if (!(cpc->reason & CP_DISCARD)) {
+-				cpc->trim_start = segno;
+-				add_discard_addrs(sbi, cpc, false);
+-			}
+-
+-			if (to_journal) {
+-				offset = lookup_journal_in_cursum(journal,
+-							SIT_JOURNAL, segno, 1);
+-				f2fs_bug_on(sbi, offset < 0);
+-				segno_in_journal(journal, offset) =
+-							cpu_to_le32(segno);
+-				seg_info_to_raw_sit(se,
+-					&sit_in_journal(journal, offset));
+-			} else {
+-				sit_offset = SIT_ENTRY_OFFSET(sit_i, segno);
+-				seg_info_to_raw_sit(se,
+-						&raw_sit->entries[sit_offset]);
+-			}
+-
+-			__clear_bit(segno, bitmap);
+-			sit_i->dirty_sentries--;
+-			ses->entry_cnt--;
+-		}
+-
+-		if (to_journal)
+-			up_write(&curseg->journal_rwsem);
+-		else
+-			f2fs_put_page(page, 1);
+-
+-		f2fs_bug_on(sbi, ses->entry_cnt);
+-		release_sit_entry_set(ses);
+-	}
+-
+-	f2fs_bug_on(sbi, !list_empty(head));
+-	f2fs_bug_on(sbi, sit_i->dirty_sentries);
+-out:
+-	if (cpc->reason & CP_DISCARD) {
+-		__u64 trim_start = cpc->trim_start;
+-
+-		for (; cpc->trim_start <= cpc->trim_end; cpc->trim_start++)
+-			add_discard_addrs(sbi, cpc, false);
+-
+-		cpc->trim_start = trim_start;
+-	}
+-	mutex_unlock(&sit_i->sentry_lock);
+-
+-	set_prefree_as_free_segments(sbi);
+-}
+-
+-static int build_sit_info(struct f2fs_sb_info *sbi)
+-{
+-	struct f2fs_super_block *raw_super = F2FS_RAW_SUPER(sbi);
+-	struct sit_info *sit_i;
+-	unsigned int sit_segs, start;
+-	char *src_bitmap;
+-	unsigned int bitmap_size;
+-
+-	/* allocate memory for SIT information */
+-	sit_i = kzalloc(sizeof(struct sit_info), GFP_KERNEL);
+-	if (!sit_i)
+-		return -ENOMEM;
+-
+-	SM_I(sbi)->sit_info = sit_i;
+-
+-	sit_i->sentries = f2fs_kvzalloc(MAIN_SEGS(sbi) *
+-					sizeof(struct seg_entry), GFP_KERNEL);
+-	if (!sit_i->sentries)
+-		return -ENOMEM;
+-
+-	bitmap_size = f2fs_bitmap_size(MAIN_SEGS(sbi));
+-	sit_i->dirty_sentries_bitmap = f2fs_kvzalloc(bitmap_size, GFP_KERNEL);
+-	if (!sit_i->dirty_sentries_bitmap)
+-		return -ENOMEM;
+-
+-	for (start = 0; start < MAIN_SEGS(sbi); start++) {
+-		sit_i->sentries[start].cur_valid_map
+-			= kzalloc(SIT_VBLOCK_MAP_SIZE, GFP_KERNEL);
+-		sit_i->sentries[start].ckpt_valid_map
+-			= kzalloc(SIT_VBLOCK_MAP_SIZE, GFP_KERNEL);
+-		if (!sit_i->sentries[start].cur_valid_map ||
+-				!sit_i->sentries[start].ckpt_valid_map)
+-			return -ENOMEM;
+-
+-#ifdef CONFIG_F2FS_CHECK_FS
+-		sit_i->sentries[start].cur_valid_map_mir
+-			= kzalloc(SIT_VBLOCK_MAP_SIZE, GFP_KERNEL);
+-		if (!sit_i->sentries[start].cur_valid_map_mir)
+-			return -ENOMEM;
+-#endif
+-
+-		if (f2fs_discard_en(sbi)) {
+-			sit_i->sentries[start].discard_map
+-				= kzalloc(SIT_VBLOCK_MAP_SIZE, GFP_KERNEL);
+-			if (!sit_i->sentries[start].discard_map)
+-				return -ENOMEM;
+-		}
+-	}
+-
+-	sit_i->tmp_map = kzalloc(SIT_VBLOCK_MAP_SIZE, GFP_KERNEL);
+-	if (!sit_i->tmp_map)
+-		return -ENOMEM;
+-
+-	if (sbi->segs_per_sec > 1) {
+-		sit_i->sec_entries = f2fs_kvzalloc(MAIN_SECS(sbi) *
+-					sizeof(struct sec_entry), GFP_KERNEL);
+-		if (!sit_i->sec_entries)
+-			return -ENOMEM;
+-	}
+-
+-	/* get information related with SIT */
+-	sit_segs = le32_to_cpu(raw_super->segment_count_sit) >> 1;
+-
+-	/* setup SIT bitmap from ckeckpoint pack */
+-	bitmap_size = __bitmap_size(sbi, SIT_BITMAP);
+-	src_bitmap = __bitmap_ptr(sbi, SIT_BITMAP);
+-
+-	sit_i->sit_bitmap = kmemdup(src_bitmap, bitmap_size, GFP_KERNEL);
+-	if (!sit_i->sit_bitmap)
+-		return -ENOMEM;
+-
+-#ifdef CONFIG_F2FS_CHECK_FS
+-	sit_i->sit_bitmap_mir = kmemdup(src_bitmap, bitmap_size, GFP_KERNEL);
+-	if (!sit_i->sit_bitmap_mir)
+-		return -ENOMEM;
+-#endif
+-
+-	/* init SIT information */
+-	sit_i->s_ops = &default_salloc_ops;
+-
+-	sit_i->sit_base_addr = le32_to_cpu(raw_super->sit_blkaddr);
+-	sit_i->sit_blocks = sit_segs << sbi->log_blocks_per_seg;
+-	sit_i->written_valid_blocks = 0;
+-	sit_i->bitmap_size = bitmap_size;
+-	sit_i->dirty_sentries = 0;
+-	sit_i->sents_per_block = SIT_ENTRY_PER_BLOCK;
+-	sit_i->elapsed_time = le64_to_cpu(sbi->ckpt->elapsed_time);
+-	sit_i->mounted_time = CURRENT_TIME_SEC.tv_sec;
+-	mutex_init(&sit_i->sentry_lock);
+-	return 0;
+-}
+-
+-static int build_free_segmap(struct f2fs_sb_info *sbi)
+-{
+-	struct free_segmap_info *free_i;
+-	unsigned int bitmap_size, sec_bitmap_size;
+-
+-	/* allocate memory for free segmap information */
+-	free_i = kzalloc(sizeof(struct free_segmap_info), GFP_KERNEL);
+-	if (!free_i)
+-		return -ENOMEM;
+-
+-	SM_I(sbi)->free_info = free_i;
+-
+-	bitmap_size = f2fs_bitmap_size(MAIN_SEGS(sbi));
+-	free_i->free_segmap = f2fs_kvmalloc(bitmap_size, GFP_KERNEL);
+-	if (!free_i->free_segmap)
+-		return -ENOMEM;
+-
+-	sec_bitmap_size = f2fs_bitmap_size(MAIN_SECS(sbi));
+-	free_i->free_secmap = f2fs_kvmalloc(sec_bitmap_size, GFP_KERNEL);
+-	if (!free_i->free_secmap)
+-		return -ENOMEM;
+-
+-	/* set all segments as dirty temporarily */
+-	memset(free_i->free_segmap, 0xff, bitmap_size);
+-	memset(free_i->free_secmap, 0xff, sec_bitmap_size);
+-
+-	/* init free segmap information */
+-	free_i->start_segno = GET_SEGNO_FROM_SEG0(sbi, MAIN_BLKADDR(sbi));
+-	free_i->free_segments = 0;
+-	free_i->free_sections = 0;
+-	spin_lock_init(&free_i->segmap_lock);
+-	return 0;
+-}
+-
+-static int build_curseg(struct f2fs_sb_info *sbi)
+-{
+-	struct curseg_info *array;
+-	int i;
+-
+-	array = kcalloc(NR_CURSEG_TYPE, sizeof(*array), GFP_KERNEL);
+-	if (!array)
+-		return -ENOMEM;
+-
+-	SM_I(sbi)->curseg_array = array;
+-
+-	for (i = 0; i < NR_CURSEG_TYPE; i++) {
+-		mutex_init(&array[i].curseg_mutex);
+-		array[i].sum_blk = kzalloc(PAGE_SIZE, GFP_KERNEL);
+-		if (!array[i].sum_blk)
+-			return -ENOMEM;
+-		init_rwsem(&array[i].journal_rwsem);
+-		array[i].journal = kzalloc(sizeof(struct f2fs_journal),
+-							GFP_KERNEL);
+-		if (!array[i].journal)
+-			return -ENOMEM;
+-		array[i].segno = NULL_SEGNO;
+-		array[i].next_blkoff = 0;
+-	}
+-	return restore_curseg_summaries(sbi);
+-}
+-
+-static void build_sit_entries(struct f2fs_sb_info *sbi)
+-{
+-	struct sit_info *sit_i = SIT_I(sbi);
+-	struct curseg_info *curseg = CURSEG_I(sbi, CURSEG_COLD_DATA);
+-	struct f2fs_journal *journal = curseg->journal;
+-	struct seg_entry *se;
+-	struct f2fs_sit_entry sit;
+-	int sit_blk_cnt = SIT_BLK_CNT(sbi);
+-	unsigned int i, start, end;
+-	unsigned int readed, start_blk = 0;
+-
+-	do {
+-		readed = ra_meta_pages(sbi, start_blk, BIO_MAX_PAGES,
+-							META_SIT, true);
+-
+-		start = start_blk * sit_i->sents_per_block;
+-		end = (start_blk + readed) * sit_i->sents_per_block;
+-
+-		for (; start < end && start < MAIN_SEGS(sbi); start++) {
+-			struct f2fs_sit_block *sit_blk;
+-			struct page *page;
+-
+-			se = &sit_i->sentries[start];
+-			page = get_current_sit_page(sbi, start);
+-			sit_blk = (struct f2fs_sit_block *)page_address(page);
+-			sit = sit_blk->entries[SIT_ENTRY_OFFSET(sit_i, start)];
+-			f2fs_put_page(page, 1);
+-
+-			check_block_count(sbi, start, &sit);
+-			seg_info_from_raw_sit(se, &sit);
+-
+-			/* build discard map only one time */
+-			if (f2fs_discard_en(sbi)) {
+-				if (is_set_ckpt_flags(sbi, CP_TRIMMED_FLAG)) {
+-					memset(se->discard_map, 0xff,
+-						SIT_VBLOCK_MAP_SIZE);
+-				} else {
+-					memcpy(se->discard_map,
+-						se->cur_valid_map,
+-						SIT_VBLOCK_MAP_SIZE);
+-					sbi->discard_blks +=
+-						sbi->blocks_per_seg -
+-						se->valid_blocks;
+-				}
+-			}
+-
+-			if (sbi->segs_per_sec > 1)
+-				get_sec_entry(sbi, start)->valid_blocks +=
+-							se->valid_blocks;
+-		}
+-		start_blk += readed;
+-	} while (start_blk < sit_blk_cnt);
+-
+-	down_read(&curseg->journal_rwsem);
+-	for (i = 0; i < sits_in_cursum(journal); i++) {
+-		unsigned int old_valid_blocks;
+-
+-		start = le32_to_cpu(segno_in_journal(journal, i));
+-		se = &sit_i->sentries[start];
+-		sit = sit_in_journal(journal, i);
+-
+-		old_valid_blocks = se->valid_blocks;
+-
+-		check_block_count(sbi, start, &sit);
+-		seg_info_from_raw_sit(se, &sit);
+-
+-		if (f2fs_discard_en(sbi)) {
+-			if (is_set_ckpt_flags(sbi, CP_TRIMMED_FLAG)) {
+-				memset(se->discard_map, 0xff,
+-							SIT_VBLOCK_MAP_SIZE);
+-			} else {
+-				memcpy(se->discard_map, se->cur_valid_map,
+-							SIT_VBLOCK_MAP_SIZE);
+-				sbi->discard_blks += old_valid_blocks -
+-							se->valid_blocks;
+-			}
+-		}
+-
+-		if (sbi->segs_per_sec > 1)
+-			get_sec_entry(sbi, start)->valid_blocks +=
+-				se->valid_blocks - old_valid_blocks;
+-	}
+-	up_read(&curseg->journal_rwsem);
+-}
+-
+-static void init_free_segmap(struct f2fs_sb_info *sbi)
+-{
+-	unsigned int start;
+-	int type;
+-
+-	for (start = 0; start < MAIN_SEGS(sbi); start++) {
+-		struct seg_entry *sentry = get_seg_entry(sbi, start);
+-		if (!sentry->valid_blocks)
+-			__set_free(sbi, start);
+-		else
+-			SIT_I(sbi)->written_valid_blocks +=
+-						sentry->valid_blocks;
+-	}
+-
+-	/* set use the current segments */
+-	for (type = CURSEG_HOT_DATA; type <= CURSEG_COLD_NODE; type++) {
+-		struct curseg_info *curseg_t = CURSEG_I(sbi, type);
+-		__set_test_and_inuse(sbi, curseg_t->segno);
+-	}
+-}
+-
+-static void init_dirty_segmap(struct f2fs_sb_info *sbi)
+-{
+-	struct dirty_seglist_info *dirty_i = DIRTY_I(sbi);
+-	struct free_segmap_info *free_i = FREE_I(sbi);
+-	unsigned int segno = 0, offset = 0;
+-	unsigned short valid_blocks;
+-
+-	while (1) {
+-		/* find dirty segment based on free segmap */
+-		segno = find_next_inuse(free_i, MAIN_SEGS(sbi), offset);
+-		if (segno >= MAIN_SEGS(sbi))
+-			break;
+-		offset = segno + 1;
+-		valid_blocks = get_valid_blocks(sbi, segno, false);
+-		if (valid_blocks == sbi->blocks_per_seg || !valid_blocks)
+-			continue;
+-		if (valid_blocks > sbi->blocks_per_seg) {
+-			f2fs_bug_on(sbi, 1);
+-			continue;
+-		}
+-		mutex_lock(&dirty_i->seglist_lock);
+-		__locate_dirty_segment(sbi, segno, DIRTY);
+-		mutex_unlock(&dirty_i->seglist_lock);
+-	}
+-}
+-
+-static int init_victim_secmap(struct f2fs_sb_info *sbi)
+-{
+-	struct dirty_seglist_info *dirty_i = DIRTY_I(sbi);
+-	unsigned int bitmap_size = f2fs_bitmap_size(MAIN_SECS(sbi));
+-
+-	dirty_i->victim_secmap = f2fs_kvzalloc(bitmap_size, GFP_KERNEL);
+-	if (!dirty_i->victim_secmap)
+-		return -ENOMEM;
+-	return 0;
+-}
+-
+-static int build_dirty_segmap(struct f2fs_sb_info *sbi)
+-{
+-	struct dirty_seglist_info *dirty_i;
+-	unsigned int bitmap_size, i;
+-
+-	/* allocate memory for dirty segments list information */
+-	dirty_i = kzalloc(sizeof(struct dirty_seglist_info), GFP_KERNEL);
+-	if (!dirty_i)
+-		return -ENOMEM;
+-
+-	SM_I(sbi)->dirty_info = dirty_i;
+-	mutex_init(&dirty_i->seglist_lock);
+-
+-	bitmap_size = f2fs_bitmap_size(MAIN_SEGS(sbi));
+-
+-	for (i = 0; i < NR_DIRTY_TYPE; i++) {
+-		dirty_i->dirty_segmap[i] = f2fs_kvzalloc(bitmap_size, GFP_KERNEL);
+-		if (!dirty_i->dirty_segmap[i])
+-			return -ENOMEM;
+-	}
+-
+-	init_dirty_segmap(sbi);
+-	return init_victim_secmap(sbi);
+-}
+-
+-/*
+- * Update min, max modified time for cost-benefit GC algorithm
+- */
+-static void init_min_max_mtime(struct f2fs_sb_info *sbi)
+-{
+-	struct sit_info *sit_i = SIT_I(sbi);
+-	unsigned int segno;
+-
+-	mutex_lock(&sit_i->sentry_lock);
+-
+-	sit_i->min_mtime = LLONG_MAX;
+-
+-	for (segno = 0; segno < MAIN_SEGS(sbi); segno += sbi->segs_per_sec) {
+-		unsigned int i;
+-		unsigned long long mtime = 0;
+-
+-		for (i = 0; i < sbi->segs_per_sec; i++)
+-			mtime += get_seg_entry(sbi, segno + i)->mtime;
+-
+-		mtime = div_u64(mtime, sbi->segs_per_sec);
+-
+-		if (sit_i->min_mtime > mtime)
+-			sit_i->min_mtime = mtime;
+-	}
+-	sit_i->max_mtime = get_mtime(sbi);
+-	mutex_unlock(&sit_i->sentry_lock);
+-}
+-
+-int build_segment_manager(struct f2fs_sb_info *sbi)
+-{
+-	struct f2fs_super_block *raw_super = F2FS_RAW_SUPER(sbi);
+-	struct f2fs_checkpoint *ckpt = F2FS_CKPT(sbi);
+-	struct f2fs_sm_info *sm_info;
+-	int err;
+-
+-	sm_info = kzalloc(sizeof(struct f2fs_sm_info), GFP_KERNEL);
+-	if (!sm_info)
+-		return -ENOMEM;
+-
+-	/* init sm info */
+-	sbi->sm_info = sm_info;
+-	sm_info->seg0_blkaddr = le32_to_cpu(raw_super->segment0_blkaddr);
+-	sm_info->main_blkaddr = le32_to_cpu(raw_super->main_blkaddr);
+-	sm_info->segment_count = le32_to_cpu(raw_super->segment_count);
+-	sm_info->reserved_segments = le32_to_cpu(ckpt->rsvd_segment_count);
+-	sm_info->ovp_segments = le32_to_cpu(ckpt->overprov_segment_count);
+-	sm_info->main_segments = le32_to_cpu(raw_super->segment_count_main);
+-	sm_info->ssa_blkaddr = le32_to_cpu(raw_super->ssa_blkaddr);
+-	sm_info->rec_prefree_segments = sm_info->main_segments *
+-					DEF_RECLAIM_PREFREE_SEGMENTS / 100;
+-	if (sm_info->rec_prefree_segments > DEF_MAX_RECLAIM_PREFREE_SEGMENTS)
+-		sm_info->rec_prefree_segments = DEF_MAX_RECLAIM_PREFREE_SEGMENTS;
+-
+-	if (!test_opt(sbi, LFS))
+-		sm_info->ipu_policy = 1 << F2FS_IPU_FSYNC;
+-	sm_info->min_ipu_util = DEF_MIN_IPU_UTIL;
+-	sm_info->min_fsync_blocks = DEF_MIN_FSYNC_BLOCKS;
+-	sm_info->min_hot_blocks = DEF_MIN_HOT_BLOCKS;
+-
+-	sm_info->trim_sections = DEF_BATCHED_TRIM_SECTIONS;
+-
+-	INIT_LIST_HEAD(&sm_info->sit_entry_set);
+-
+-	if (!f2fs_readonly(sbi->sb)) {
+-		err = create_flush_cmd_control(sbi);
+-		if (err)
+-			return err;
+-	}
+-
+-	err = create_discard_cmd_control(sbi);
+-	if (err)
+-		return err;
+-
+-	err = build_sit_info(sbi);
+-	if (err)
+-		return err;
+-	err = build_free_segmap(sbi);
+-	if (err)
+-		return err;
+-	err = build_curseg(sbi);
+-	if (err)
+-		return err;
+-
+-	/* reinit free segmap based on SIT */
+-	build_sit_entries(sbi);
+-
+-	init_free_segmap(sbi);
+-	err = build_dirty_segmap(sbi);
+-	if (err)
+-		return err;
+-
+-	init_min_max_mtime(sbi);
+-	return 0;
+-}
+-
+-static void discard_dirty_segmap(struct f2fs_sb_info *sbi,
+-		enum dirty_type dirty_type)
+-{
+-	struct dirty_seglist_info *dirty_i = DIRTY_I(sbi);
+-
+-	mutex_lock(&dirty_i->seglist_lock);
+-	f2fs_kvfree(dirty_i->dirty_segmap[dirty_type]);
+-	dirty_i->nr_dirty[dirty_type] = 0;
+-	mutex_unlock(&dirty_i->seglist_lock);
+-}
+-
+-static void destroy_victim_secmap(struct f2fs_sb_info *sbi)
+-{
+-	struct dirty_seglist_info *dirty_i = DIRTY_I(sbi);
+-	f2fs_kvfree(dirty_i->victim_secmap);
+-}
+-
+-static void destroy_dirty_segmap(struct f2fs_sb_info *sbi)
+-{
+-	struct dirty_seglist_info *dirty_i = DIRTY_I(sbi);
+-	int i;
+-
+-	if (!dirty_i)
+-		return;
+-
+-	/* discard pre-free/dirty segments list */
+-	for (i = 0; i < NR_DIRTY_TYPE; i++)
+-		discard_dirty_segmap(sbi, i);
+-
+-	destroy_victim_secmap(sbi);
+-	SM_I(sbi)->dirty_info = NULL;
+-	kfree(dirty_i);
+-}
+-
+-static void destroy_curseg(struct f2fs_sb_info *sbi)
+-{
+-	struct curseg_info *array = SM_I(sbi)->curseg_array;
+-	int i;
+-
+-	if (!array)
+-		return;
+-	SM_I(sbi)->curseg_array = NULL;
+-	for (i = 0; i < NR_CURSEG_TYPE; i++) {
+-		kfree(array[i].sum_blk);
+-		kfree(array[i].journal);
+-	}
+-	kfree(array);
+-}
+-
+-static void destroy_free_segmap(struct f2fs_sb_info *sbi)
+-{
+-	struct free_segmap_info *free_i = SM_I(sbi)->free_info;
+-	if (!free_i)
+-		return;
+-	SM_I(sbi)->free_info = NULL;
+-	f2fs_kvfree(free_i->free_segmap);
+-	f2fs_kvfree(free_i->free_secmap);
+-	kfree(free_i);
+-}
+-
+-static void destroy_sit_info(struct f2fs_sb_info *sbi)
+-{
+-	struct sit_info *sit_i = SIT_I(sbi);
+-	unsigned int start;
+-
+-	if (!sit_i)
+-		return;
+-
+-	if (sit_i->sentries) {
+-		for (start = 0; start < MAIN_SEGS(sbi); start++) {
+-			kfree(sit_i->sentries[start].cur_valid_map);
+-#ifdef CONFIG_F2FS_CHECK_FS
+-			kfree(sit_i->sentries[start].cur_valid_map_mir);
+-#endif
+-			kfree(sit_i->sentries[start].ckpt_valid_map);
+-			kfree(sit_i->sentries[start].discard_map);
+-		}
+-	}
+-	kfree(sit_i->tmp_map);
+-
+-	f2fs_kvfree(sit_i->sentries);
+-	f2fs_kvfree(sit_i->sec_entries);
+-	f2fs_kvfree(sit_i->dirty_sentries_bitmap);
+-
+-	SM_I(sbi)->sit_info = NULL;
+-	kfree(sit_i->sit_bitmap);
+-#ifdef CONFIG_F2FS_CHECK_FS
+-	kfree(sit_i->sit_bitmap_mir);
+-#endif
+-	kfree(sit_i);
+-}
+-
+-void destroy_segment_manager(struct f2fs_sb_info *sbi)
+-{
+-	struct f2fs_sm_info *sm_info = SM_I(sbi);
+-
+-	if (!sm_info)
+-		return;
+-	destroy_flush_cmd_control(sbi, true);
+-	destroy_discard_cmd_control(sbi);
+-	destroy_dirty_segmap(sbi);
+-	destroy_curseg(sbi);
+-	destroy_free_segmap(sbi);
+-	destroy_sit_info(sbi);
+-	sbi->sm_info = NULL;
+-	kfree(sm_info);
+-}
+-
+-int __init create_segment_manager_caches(void)
+-{
+-	discard_entry_slab = f2fs_kmem_cache_create("discard_entry",
+-			sizeof(struct discard_entry));
+-	if (!discard_entry_slab)
+-		goto fail;
+-
+-	discard_cmd_slab = f2fs_kmem_cache_create("discard_cmd",
+-			sizeof(struct discard_cmd));
+-	if (!discard_cmd_slab)
+-		goto destroy_discard_entry;
+-
+-	sit_entry_set_slab = f2fs_kmem_cache_create("sit_entry_set",
+-			sizeof(struct sit_entry_set));
+-	if (!sit_entry_set_slab)
+-		goto destroy_discard_cmd;
+-
+-	inmem_entry_slab = f2fs_kmem_cache_create("inmem_page_entry",
+-			sizeof(struct inmem_pages));
+-	if (!inmem_entry_slab)
+-		goto destroy_sit_entry_set;
+-	return 0;
+-
+-destroy_sit_entry_set:
+-	kmem_cache_destroy(sit_entry_set_slab);
+-destroy_discard_cmd:
+-	kmem_cache_destroy(discard_cmd_slab);
+-destroy_discard_entry:
+-	kmem_cache_destroy(discard_entry_slab);
+-fail:
+-	return -ENOMEM;
+-}
+-
+-void destroy_segment_manager_caches(void)
+-{
+-	kmem_cache_destroy(sit_entry_set_slab);
+-	kmem_cache_destroy(discard_cmd_slab);
+-	kmem_cache_destroy(discard_entry_slab);
+-	kmem_cache_destroy(inmem_entry_slab);
+-}
+diff --git a/fs/f2fs/segment.o_shipped b/fs/f2fs/segment.o_shipped
+new file mode 100644
+index 0000000000000000000000000000000000000000..aa78433c863b1705d49d750f94f2a1efd9951aa7
+GIT binary patch
+literal 59284
+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
+
+literal 0
+HcmV?d00001
+
+-- 
+2.17.1
+
