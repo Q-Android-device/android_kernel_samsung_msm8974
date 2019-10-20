@@ -1,8 +1,9 @@
-VERSION = 3
-PATCHLEVEL = 4
-SUBLEVEL = 113
+# SPDX-License-Identifier: GPL-2.0
+VERSION = 5
+PATCHLEVEL = 2
+SUBLEVEL = 0
 EXTRAVERSION =
-NAME = Saber-toothed Squirrel
+NAME = Bobtail Squid
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
