@@ -53,8 +53,8 @@
 #include "mballoc.h"
 #include "../mount.h"
 
-#define CREATE_TRACE_POINTS
-#include <trace/events/ext4.h>
+//#define CREATE_TRACE_POINTS
+//#include <trace/events/ext4.h>
 
 static struct proc_dir_entry *ext4_proc_root;
 static struct kset *ext4_kset;
@@ -336,7 +336,7 @@ handle_t *ext4_journal_start_sb(struct super_block *sb, int nblocks)
 	journal_t *journal;
 	handle_t  *handle;
 
-	trace_ext4_journal_start(sb, nblocks, _RET_IP_);
+//	trace_ext4_journal_start(sb, nblocks, _RET_IP_);
 	if (sb->s_flags & MS_RDONLY && !journal_current_handle())
 		return ERR_PTR(-EROFS);
 
@@ -1052,7 +1052,7 @@ static int ext4_drop_inode(struct inode *inode)
 {
 	int drop = generic_drop_inode(inode);
 
-	trace_ext4_drop_inode(inode, drop);
+//	trace_ext4_drop_inode(inode, drop);
 	return drop;
 }
 
@@ -1619,9 +1619,9 @@ static int handle_mount_opt(struct super_block *sb, char *opt, int token,
 		if (m->flags & MOPT_NOSUPPORT) {
 			ext4_msg(sb, KERN_ERR, "%s option not supported", opt);
 		} else if (token == Opt_commit) {
-			if (arg == 0)
-				arg = JBD2_DEFAULT_MAX_COMMIT_AGE;
-			sbi->s_commit_interval = HZ * arg;
+//			if (arg == 0)
+//				arg = JBD2_DEFAULT_MAX_COMMIT_AGE;
+			sbi->s_commit_interval = HZ * 5;
 		} else if (token == Opt_max_batch_time) {
 			if (arg == 0)
 				arg = EXT4_DEF_MAX_BATCH_TIME;
@@ -3004,7 +3004,7 @@ static struct ext4_li_request *ext4_li_request_new(struct super_block *sb,
 	 */
 	get_random_bytes(&rnd, sizeof(rnd));
 	elr->lr_next_sched = jiffies + (unsigned long)rnd %
-			     (EXT4_DEF_LI_MAX_START_DELAY * HZ);
+			     (EXT4_DEF_LI_MAX_START_DELAY * HZ/3);
 
 	return elr;
 }
@@ -3396,11 +3396,11 @@ static int ext4_fill_super(struct super_block *sb, void *data, int silent)
 	set_opt(sb, POSIX_ACL);
 #endif
 	set_opt(sb, MBLK_IO_SUBMIT);
-	if ((def_mount_opts & EXT4_DEFM_JMODE) == EXT4_DEFM_JMODE_DATA)
+/*	if ((def_mount_opts & EXT4_DEFM_JMODE) == EXT4_DEFM_JMODE_DATA)
 		set_opt(sb, JOURNAL_DATA);
 	else if ((def_mount_opts & EXT4_DEFM_JMODE) == EXT4_DEFM_JMODE_ORDERED)
 		set_opt(sb, ORDERED_DATA);
-	else if ((def_mount_opts & EXT4_DEFM_JMODE) == EXT4_DEFM_JMODE_WBACK)
+	else if ((def_mount_opts & EXT4_DEFM_JMODE) == EXT4_DEFM_JMODE_WBACK)*/
 		set_opt(sb, WRITEBACK_DATA);
 
 	if (le16_to_cpu(sbi->s_es->s_errors) == EXT4_ERRORS_PANIC)
@@ -3420,8 +3420,8 @@ static int ext4_fill_super(struct super_block *sb, void *data, int silent)
 	sbi->s_min_batch_time = EXT4_DEF_MIN_BATCH_TIME;
 	sbi->s_max_batch_time = EXT4_DEF_MAX_BATCH_TIME;
 
-	if ((def_mount_opts & EXT4_DEFM_NOBARRIER) == 0)
-		set_opt(sb, BARRIER);
+/*	if ((def_mount_opts & EXT4_DEFM_NOBARRIER) == 0)
+		set_opt(sb, BARRIER);*/
 
 	/*
 	 * enable delayed allocation by default
@@ -3429,6 +3429,7 @@ static int ext4_fill_super(struct super_block *sb, void *data, int silent)
 	 */
 	if (!IS_EXT3_SB(sb) &&
 	    ((def_mount_opts & EXT4_DEFM_NODELALLOC) == 0))
+	if (!IS_EXT3_SB(sb))
 		set_opt(sb, DELALLOC);
 
 	/*
@@ -4534,7 +4535,7 @@ static int ext4_sync_fs(struct super_block *sb, int wait)
 	tid_t target;
 	struct ext4_sb_info *sbi = EXT4_SB(sb);
 
-	trace_ext4_sync_fs(sb, wait);
+//	trace_ext4_sync_fs(sb, wait);
 	flush_workqueue(sbi->dio_unwritten_wq);
 	if (jbd2_journal_start_commit(sbi->s_journal, &target)) {
 		if (wait)

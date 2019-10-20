@@ -296,7 +296,7 @@ static inline ssize_t vfsspi_writeSync(struct vfsspi_devData *vfsSpiDev,
 }
 
 /* Return no.of bytes read >0. negative integer incase of error. */
-inline ssize_t vfsspi_readSync(struct vfsspi_devData *vfsSpiDev,
+static inline ssize_t vfsspi_readSync(struct vfsspi_devData *vfsSpiDev,
 	unsigned char *buf, size_t len)
 {
 	int status = 0;
@@ -1583,7 +1583,7 @@ static void vfsspi_timer_func(unsigned long ptr)
 		round_jiffies_up(jiffies + FPSENSOR_DEBUG_TIMER_SEC));
 }
 
-#define TEST_DEBUG
+//#define TEST_DEBUG
 
 int vfsspi_probe(struct spi_device *spi)
 {

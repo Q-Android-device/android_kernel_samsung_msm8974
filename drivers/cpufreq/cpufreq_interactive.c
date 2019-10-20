@@ -32,11 +32,11 @@
 #include <linux/kernel_stat.h>
 #include <asm/cputime.h>
 
-#define CREATE_TRACE_POINTS
+//#define CREATE_TRACE_POINTS
 #include <trace/events/cpufreq_interactive.h>
 
-#define CONFIG_MODE_AUTO_CHANGE
-#define CONFIG_RETENTION_CHANGE
+//#define CONFIG_MODE_AUTO_CHANGE
+//#define CONFIG_RETENTION_CHANGE
 
 static int active_count;
 
@@ -48,6 +48,7 @@ struct cpufreq_interactive_cpuinfo {
 	u64 time_in_idle_timestamp;
 	u64 cputime_speedadj;
 	u64 cputime_speedadj_timestamp;
+	u64 last_evaluated_jiffy;
 	struct cpufreq_policy *policy;
 	struct cpufreq_frequency_table *freq_table;
 	unsigned int target_freq;
@@ -69,17 +70,17 @@ static spinlock_t speedchange_cpumask_lock;
 static struct mutex gov_lock;
 
 /* Hi speed to bump to from lo speed when load burst (default max) */
-static unsigned int hispeed_freq;
+static unsigned int hispeed_freq = 2265600;
 
 /* Go to hi speed when CPU load at or above this value. */
 #define DEFAULT_GO_HISPEED_LOAD 99
 static unsigned long go_hispeed_load = DEFAULT_GO_HISPEED_LOAD;
 
 /* Sampling down factor to be applied to min_sample_time at max freq */
-static unsigned int sampling_down_factor;
+static unsigned int sampling_down_factor = 0;
 
 /* Target load.  Lower values result in higher CPU speeds. */
-#define DEFAULT_TARGET_LOAD 90
+#define DEFAULT_TARGET_LOAD 85
 static unsigned int default_target_loads[] = {DEFAULT_TARGET_LOAD};
 static spinlock_t target_loads_lock;
 static unsigned int *target_loads = default_target_loads;
@@ -88,13 +89,13 @@ static int ntarget_loads = ARRAY_SIZE(default_target_loads);
 /*
  * The minimum amount of time to spend at a frequency before we can ramp down.
  */
-#define DEFAULT_MIN_SAMPLE_TIME (80 * USEC_PER_MSEC)
+#define DEFAULT_MIN_SAMPLE_TIME (60 * USEC_PER_MSEC)
 static unsigned long min_sample_time = DEFAULT_MIN_SAMPLE_TIME;
 
 /*
  * The sample rate of the timer used to increase frequency
  */
-#define DEFAULT_TIMER_RATE (20 * USEC_PER_MSEC)
+#define DEFAULT_TIMER_RATE (15 * USEC_PER_MSEC)
 static unsigned long timer_rate = DEFAULT_TIMER_RATE;
 
 /* Busy SDF parameters*/
@@ -105,8 +106,7 @@ static unsigned long timer_rate = DEFAULT_TIMER_RATE;
  * timer interval.
  */
 #define DEFAULT_ABOVE_HISPEED_DELAY DEFAULT_TIMER_RATE
-static unsigned int default_above_hispeed_delay[] = {
-	DEFAULT_ABOVE_HISPEED_DELAY };
+static unsigned int default_above_hispeed_delay[] = { 10000, 2265600, 100000 };
 static spinlock_t above_hispeed_delay_lock;
 static unsigned int *above_hispeed_delay = default_above_hispeed_delay;
 static int nabove_hispeed_delay = ARRAY_SIZE(default_above_hispeed_delay);
@@ -122,10 +122,12 @@ static u64 boostpulse_endtime;
  * Max additional time to wait in idle, beyond timer_rate, at speeds above
  * minimum before wakeup to reduce speed, or -1 if unnecessary.
  */
-#define DEFAULT_TIMER_SLACK (4 * DEFAULT_TIMER_RATE)
+
+#define DEFAULT_TIMER_SLACK -1
+//#define DEFAULT_TIMER_SLACK (10 * DEFAULT_TIMER_RATE)
 static int timer_slack_val = DEFAULT_TIMER_SLACK;
 
-static bool io_is_busy;
+static bool io_is_busy = false;
 
 #ifdef CONFIG_MODE_AUTO_CHANGE
 struct cpufreq_loadinfo {
@@ -200,13 +202,17 @@ static unsigned int up_threshold_any_cpu_freq;
 static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 		unsigned int event);
 
+#ifdef CONFIG_TUNED_PLUG
+extern bool displayon;
+#endif
+
 #define DYN_DEFER (1)
 		
 #ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE
 static
 #endif
 struct cpufreq_governor cpufreq_gov_interactive = {
-	.name = "interactive",
+	.name = "Tuned",
 	.governor = cpufreq_governor_interactive,
 	.max_transition_latency = 10000000,
 	.owner = THIS_MODULE,
@@ -215,9 +221,9 @@ struct cpufreq_governor cpufreq_gov_interactive = {
 static inline cputime64_t get_cpu_idle_time_jiffy(unsigned int cpu,
 						  cputime64_t *wall)
 {
-	u64 idle_time;
-	u64 cur_wall_time;
-	u64 busy_time;
+	static u64 idle_time;
+	static u64 cur_wall_time;
+	static u64 busy_time;
 
 	cur_wall_time = jiffies64_to_cputime64(get_jiffies_64());
 
@@ -264,10 +270,19 @@ static inline cputime64_t get_cpu_idle_time(unsigned int cpu,
 	return idle_time;
 }
 
+/* Round to starting jiffy of next evaluation window */
+static u64 round_to_nw_start(u64 jif)
+{
+	unsigned long step = usecs_to_jiffies(timer_rate);
+
+	do_div(jif, step);
+	return (jif + 1) * step;
+}
+
 static void cpufreq_interactive_timer_resched(
 	struct cpufreq_interactive_cpuinfo *pcpu)
 {
-	unsigned long expires;
+	u64 expires;
 	unsigned long flags;
 
 	spin_lock_irqsave(&pcpu->load_lock, flags);
@@ -276,8 +291,15 @@ static void cpufreq_interactive_timer_resched(
 				     &pcpu->time_in_idle_timestamp);
 	pcpu->cputime_speedadj = 0;
 	pcpu->cputime_speedadj_timestamp = pcpu->time_in_idle_timestamp;
-	expires = jiffies + usecs_to_jiffies(timer_rate);
-	
+#ifdef CONFIG_TUNED_PLUG
+	if (displayon)
+		expires = round_to_nw_start(pcpu->last_evaluated_jiffy);
+	else
+		expires = round_to_nw_start(pcpu->last_evaluated_jiffy);
+#else
+	expires = round_to_nw_start(pcpu->last_evaluated_jiffy);
+#endif
+
 #ifdef DYN_DEFER
        if (pcpu->target_freq > pcpu->policy->min)
                timer_set_nondeferrable(&pcpu->cpu_timer);
@@ -302,7 +324,7 @@ static void cpufreq_interactive_timer_resched(
 static void cpufreq_interactive_timer_start(int cpu)
 {
 	struct cpufreq_interactive_cpuinfo *pcpu = &per_cpu(cpuinfo, cpu);
-	unsigned long expires = jiffies + usecs_to_jiffies(timer_rate);
+	u64 expires = round_to_nw_start(pcpu->last_evaluated_jiffy);
 	unsigned long flags;
 
 	pcpu->cpu_timer.expires = expires;
@@ -378,7 +400,10 @@ static unsigned int choose_freq(
 	do {
 		prevfreq = freq;
 		tl = freq_to_targetload(freq);
-
+#ifdef CONFIG_TUNED_PLUG
+	        if (!displayon)
+			tl += tl;
+#endif
 		/*
 		 * Find the lowest frequency where the computed load is less
 		 * than or equal to the target load.
@@ -618,15 +643,11 @@ static void exit_mode(void)
 
 static void cpufreq_interactive_timer(unsigned long data)
 {
-	u64 now;
-	unsigned int delta_time;
-	u64 cputime_speedadj;
+	u64 now, cputime_speedadj;
+	unsigned int delta_time, loadadjfreq, new_freq, index;
 	int cpu_load;
 	struct cpufreq_interactive_cpuinfo *pcpu =
 		&per_cpu(cpuinfo, data);
-	unsigned int new_freq;
-	unsigned int loadadjfreq;
-	unsigned int index;
 	unsigned long flags;
 	bool boosted;
 	unsigned long mod_min_sample_time;
@@ -645,6 +666,7 @@ static void cpufreq_interactive_timer(unsigned long data)
 	now = update_load(data);
 	delta_time = (unsigned int)(now - pcpu->cputime_speedadj_timestamp);
 	cputime_speedadj = pcpu->cputime_speedadj;
+	pcpu->last_evaluated_jiffy = get_jiffies_64();
 	spin_unlock_irqrestore(&pcpu->load_lock, flags);
 
 	if (WARN_ON_ONCE(!delta_time))
@@ -1700,7 +1722,7 @@ static struct attribute *interactive_attributes[] = {
 
 static struct attribute_group interactive_attr_group = {
 	.attrs = interactive_attributes,
-	.name = "interactive",
+	.name = "Tuned",
 };
 
 static int cpufreq_interactive_idle_notifier(struct notifier_block *nb,
@@ -1784,6 +1806,7 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 			down_write(&pcpu->enable_sem);
 			del_timer_sync(&pcpu->cpu_timer);
 			del_timer_sync(&pcpu->cpu_slack_timer);
+			pcpu->last_evaluated_jiffy = get_jiffies_64();
 			cpufreq_interactive_timer_start(j);
 			pcpu->governor_enabled = 1;
 			up_write(&pcpu->enable_sem);
