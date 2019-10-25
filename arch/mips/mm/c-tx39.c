@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * r2300.c: R2000 and R3000 specific mmu/cache code.
  *
@@ -28,14 +29,12 @@ static unsigned long icache_size, dcache_size;		/* Size in bytes */
 
 #include <asm/r4kcache.h>
 
-extern int r3k_have_wired_reg;	/* in r3k-tlb.c */
-
 /* This sequence is required to ensure icache is disabled immediately */
 #define TX39_STOP_STREAMING() \
 __asm__ __volatile__( \
-	".set    push\n\t" \
-	".set    noreorder\n\t" \
-	"b       1f\n\t" \
+	".set	 push\n\t" \
+	".set	 noreorder\n\t" \
+	"b	 1f\n\t" \
 	"nop\n\t" \
 	"1:\n\t" \
 	".set pop" \
@@ -291,25 +290,6 @@ static void tx39_dma_cache_inv(unsigned long addr, unsigned long size)
 	}
 }
 
-static void tx39_flush_cache_sigtramp(unsigned long addr)
-{
-	unsigned long ic_lsize = current_cpu_data.icache.linesz;
-	unsigned long dc_lsize = current_cpu_data.dcache.linesz;
-	unsigned long config;
-	unsigned long flags;
-
-	protected_writeback_dcache_line(addr & ~(dc_lsize - 1));
-
-	/* disable icache (set ICE#) */
-	local_irq_save(flags);
-	config = read_c0_conf();
-	write_c0_conf(config & ~TX39_CONF_ICE);
-	TX39_STOP_STREAMING();
-	protected_flush_icache_line(addr & ~(ic_lsize - 1));
-	write_c0_conf(config);
-	local_irq_restore(flags);
-}
-
 static __init void tx39_probe_cache(void)
 {
 	unsigned long config;
@@ -344,7 +324,7 @@ static __init void tx39_probe_cache(void)
 	}
 }
 
-void __cpuinit tx39_cache_init(void)
+void tx39_cache_init(void)
 {
 	extern void build_clear_page(void);
 	extern void build_copy_page(void);
@@ -361,7 +341,7 @@ void __cpuinit tx39_cache_init(void)
 		/* TX39/H core (writethru direct-map cache) */
 		__flush_cache_vmap	= tx39__flush_cache_vmap;
 		__flush_cache_vunmap	= tx39__flush_cache_vunmap;
-		flush_cache_all	= tx39h_flush_icache_all;
+		flush_cache_all = tx39h_flush_icache_all;
 		__flush_cache_all	= tx39h_flush_icache_all;
 		flush_cache_mm		= (void *) tx39h_flush_icache_all;
 		flush_cache_range	= (void *) tx39h_flush_icache_all;
@@ -369,7 +349,6 @@ void __cpuinit tx39_cache_init(void)
 		flush_icache_range	= (void *) tx39h_flush_icache_all;
 		local_flush_icache_range = (void *) tx39h_flush_icache_all;
 
-		flush_cache_sigtramp	= (void *) tx39h_flush_icache_all;
 		local_flush_data_cache_page	= (void *) tx39h_flush_icache_all;
 		flush_data_cache_page	= (void *) tx39h_flush_icache_all;
 
@@ -383,8 +362,6 @@ void __cpuinit tx39_cache_init(void)
 	case CPU_TX3927:
 	default:
 		/* TX39/H2,H3 core (writeback 2way-set-associative cache) */
-		r3k_have_wired_reg = 1;
-		write_c0_wired(0);	/* set 8 on reset... */
 		/* board-dependent init code may set WBON */
 
 		__flush_cache_vmap	= tx39__flush_cache_vmap;
@@ -400,7 +377,6 @@ void __cpuinit tx39_cache_init(void)
 
 		__flush_kernel_vmap_range = tx39_flush_kernel_vmap_range;
 
-		flush_cache_sigtramp = tx39_flush_cache_sigtramp;
 		local_flush_data_cache_page = local_tx39_flush_data_cache_page;
 		flush_data_cache_page = tx39_flush_data_cache_page;
 
@@ -409,11 +385,14 @@ void __cpuinit tx39_cache_init(void)
 		_dma_cache_inv = tx39_dma_cache_inv;
 
 		shm_align_mask = max_t(unsigned long,
-		                       (dcache_size / current_cpu_data.dcache.ways) - 1,
-		                       PAGE_SIZE - 1);
+				       (dcache_size / current_cpu_data.dcache.ways) - 1,
+				       PAGE_SIZE - 1);
 
 		break;
 	}
+
+	__flush_icache_user_range = flush_icache_range;
+	__local_flush_icache_user_range = local_flush_icache_range;
 
 	current_cpu_data.icache.waysize = icache_size / current_cpu_data.icache.ways;
 	current_cpu_data.dcache.waysize = dcache_size / current_cpu_data.dcache.ways;

@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Performance counter support for POWER5+/++ (not POWER5) processors.
  *
  * Copyright 2009 Paul Mackerras, IBM Corporation.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 #include <linux/kernel.h>
 #include <linux/perf_event.h>
@@ -452,7 +448,7 @@ static int power5p_marked_instr_event(u64 event)
 }
 
 static int power5p_compute_mmcr(u64 event[], int n_ev,
-				unsigned int hwc[], unsigned long mmcr[])
+				unsigned int hwc[], unsigned long mmcr[], struct perf_event *pevents[])
 {
 	unsigned long mmcr1 = 0;
 	unsigned long mmcra = 0;
@@ -671,13 +667,13 @@ static struct power_pmu power5p_pmu = {
 	.get_alternatives	= power5p_get_alternatives,
 	.disable_pmc		= power5p_disable_pmc,
 	.limited_pmc_event	= power5p_limited_pmc_event,
-	.flags			= PPMU_LIMITED_PMC5_6,
+	.flags			= PPMU_LIMITED_PMC5_6 | PPMU_HAS_SSLOT,
 	.n_generic		= ARRAY_SIZE(power5p_generic_events),
 	.generic_events		= power5p_generic_events,
 	.cache_events		= &power5p_cache_events,
 };
 
-static int __init init_power5p_pmu(void)
+int init_power5p_pmu(void)
 {
 	if (!cur_cpu_spec->oprofile_cpu_type ||
 	    (strcmp(cur_cpu_spec->oprofile_cpu_type, "ppc64/power5+")
@@ -686,5 +682,3 @@ static int __init init_power5p_pmu(void)
 
 	return register_power_pmu(&power5p_pmu);
 }
-
-early_initcall(init_power5p_pmu);

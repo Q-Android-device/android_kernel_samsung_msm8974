@@ -1,12 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  Port on Texas Instruments TMS320C6x architecture
  *
  *  Copyright (C) 2004, 2009, 2010 Texas Instruments Incorporated
  *  Author: Aurelien Jacquiot (aurelien.jacquiot@jaluna.com)
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
  */
 #ifndef _ASM_C6X_BITOPS_H
 #define _ASM_C6X_BITOPS_H
@@ -14,14 +11,8 @@
 #ifdef __KERNEL__
 
 #include <linux/bitops.h>
-
 #include <asm/byteorder.h>
-
-/*
- * clear_bit() doesn't provide any barrier for the compiler.
- */
-#define smp_mb__before_clear_bit() barrier()
-#define smp_mb__after_clear_bit()  barrier()
+#include <asm/barrier.h>
 
 /*
  * We are lucky, DSP is perfect for bitops: do it in 3 cycles
@@ -60,7 +51,7 @@ static inline unsigned long __ffs(unsigned long x)
  * This is defined the same way as ffs.
  * Note fls(0) = 0, fls(1) = 1, fls(0x80000000) = 32.
  */
-static inline int fls(int x)
+static inline int fls(unsigned int x)
 {
 	if (!x)
 		return 0;

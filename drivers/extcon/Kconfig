@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 menuconfig EXTCON
 	tristate "External Connector Class (extcon) support"
 	help
@@ -14,22 +15,81 @@ if EXTCON
 
 comment "Extcon Device Drivers"
 
-config EXTCON_GPIO
-	tristate "GPIO extcon support"
-	depends on GENERIC_GPIO
-	help
-	  Say Y here to enable GPIO based extcon support. Note that GPIO
-	  extcon supports single state per extcon instance.
-
 config EXTCON_ADC_JACK
 	tristate "ADC Jack extcon support"
 	depends on IIO
 	help
 	  Say Y here to enable extcon device driver based on ADC values.
 
+config EXTCON_ARIZONA
+	tristate "Wolfson Arizona EXTCON support"
+	depends on MFD_ARIZONA && INPUT && SND_SOC
+	help
+	  Say Y here to enable support for external accessory detection
+	  with Wolfson Arizona devices. These are audio CODECs with
+	  advanced audio accessory detection support.
+
+config EXTCON_AXP288
+	tristate "X-Power AXP288 EXTCON support"
+	depends on MFD_AXP20X && USB_SUPPORT && X86 && ACPI
+	select USB_ROLE_SWITCH
+	help
+	  Say Y here to enable support for USB peripheral detection
+	  and USB MUX switching by X-Power AXP288 PMIC.
+
+config EXTCON_GPIO
+	tristate "GPIO extcon support"
+	depends on GPIOLIB || COMPILE_TEST
+	help
+	  Say Y here to enable GPIO based extcon support. Note that GPIO
+	  extcon supports single state per extcon instance.
+
+config EXTCON_INTEL_INT3496
+	tristate "Intel INT3496 ACPI device extcon driver"
+	depends on GPIOLIB && ACPI && (X86 || COMPILE_TEST)
+	help
+	  Say Y here to enable extcon support for USB OTG ports controlled by
+	  an Intel INT3496 ACPI device.
+
+	  This ACPI device is typically found on Intel Baytrail or Cherrytrail
+	  based tablets, or other Baytrail / Cherrytrail devices.
+
+config EXTCON_INTEL_CHT_WC
+	tristate "Intel Cherrytrail Whiskey Cove PMIC extcon driver"
+	depends on INTEL_SOC_PMIC_CHTWC
+	help
+	  Say Y here to enable extcon support for charger detection / control
+	  on the Intel Cherrytrail Whiskey Cove PMIC.
+
+config EXTCON_INTEL_MRFLD
+	tristate "Intel Merrifield Basin Cove PMIC extcon driver"
+	depends on INTEL_SOC_PMIC_MRFLD
+	help
+	  Say Y here to enable extcon support for charger detection / control
+	  on the Intel Merrifield Basin Cove PMIC.
+
+config EXTCON_MAX14577
+	tristate "Maxim MAX14577/77836 EXTCON Support"
+	depends on MFD_MAX14577
+	select IRQ_DOMAIN
+	select REGMAP_I2C
+	help
+	  If you say yes here you get support for the MUIC device of
+	  Maxim MAX14577/77836. The MAX14577/77836 MUIC is a USB port accessory
+	  detector and switch.
+
+config EXTCON_MAX3355
+	tristate "Maxim MAX3355 USB OTG EXTCON Support"
+	depends on GPIOLIB || COMPILE_TEST
+	help
+	  If you say yes here you get support for the USB OTG role detection by
+	  MAX3355. The MAX3355 chip integrates a charge pump and comparators to
+	  enable a system with an integrated USB OTG dual-role transceiver to
+	  function as an USB OTG dual-role device.
+
 config EXTCON_MAX77693
-	tristate "MAX77693 EXTCON Support"
-	depends on MFD_MAX77693
+	tristate "Maxim MAX77693 EXTCON Support"
+	depends on MFD_MAX77693 && INPUT
 	select IRQ_DOMAIN
 	select REGMAP_I2C
 	help
@@ -37,103 +97,81 @@ config EXTCON_MAX77693
 	  Maxim MAX77693 PMIC. The MAX77693 MUIC is a USB port accessory
 	  detector and switch.
 
-config EXTCON_FSA9485
-	tristate "FSA9485 EXTCON Support"
-	depends on I2C
+config EXTCON_MAX77843
+	tristate "Maxim MAX77843 EXTCON Support"
+	depends on MFD_MAX77843
+	select IRQ_DOMAIN
+	select REGMAP_I2C
 	help
 	  If you say yes here you get support for the MUIC device of
-	  Fairchild FSA9485. The FSA9485 MUIC is a USB port accessory
+	  Maxim MAX77843. The MAX77843 MUIC is a USB port accessory
+	  detector add switch.
+
+config EXTCON_MAX8997
+	tristate "Maxim MAX8997 EXTCON Support"
+	depends on MFD_MAX8997 && IRQ_DOMAIN
+	help
+	  If you say yes here you get support for the MUIC device of
+	  Maxim MAX8997 PMIC. The MAX8997 MUIC is a USB port accessory
 	  detector and switch.
 
-config EXTCON_TSU6721
-	tristate "TSU6721 EXTCON Support"
+config EXTCON_PALMAS
+	tristate "Palmas USB EXTCON support"
+	depends on MFD_PALMAS
+	help
+	  Say Y here to enable support for USB peripheral and USB host
+	  detection by palmas usb.
+
+config EXTCON_PTN5150
+	tristate "NXP PTN5150 CC LOGIC USB EXTCON support"
+	depends on I2C && (GPIOLIB || COMPILE_TEST)
+	select REGMAP_I2C
+	help
+	  Say Y here to enable support for USB peripheral and USB host
+	  detection by NXP PTN5150 CC (Configuration Channel) logic chip.
+
+config EXTCON_QCOM_SPMI_MISC
+	tristate "Qualcomm USB extcon support"
+	depends on ARCH_QCOM || COMPILE_TEST
+	help
+	  Say Y here to enable SPMI PMIC based USB cable detection
+	  support on Qualcomm PMICs such as PM8941.
+
+config EXTCON_RT8973A
+	tristate "Richtek RT8973A EXTCON support"
 	depends on I2C
+	select IRQ_DOMAIN
+	select REGMAP_I2C
+	select REGMAP_IRQ
 	help
 	  If you say yes here you get support for the MUIC device of
-	  Texas Instrument TSU6721. The TSU6721 MUIC is a USB port accessory
+	  Richtek RT8973A. The RT8973A is a USB port accessory detector
+	  and switch that is optimized to protect low voltage system
+	  from abnormal high input voltage (up to 28V).
+
+config EXTCON_SM5502
+	tristate "Silicon Mitus SM5502 EXTCON support"
+	depends on I2C
+	select IRQ_DOMAIN
+	select REGMAP_I2C
+	select REGMAP_IRQ
+	help
+	  If you say yes here you get support for the MUIC device of
+	  Silicon Mitus SM5502. The SM5502 is a USB port accessory
 	  detector and switch.
 
-config EXTCON_MAX77803
-	tristate "MAX77803 EXTCON Support"
-	depends on MFD_MAX77803
+config EXTCON_USB_GPIO
+	tristate "USB GPIO extcon support"
+	depends on GPIOLIB || COMPILE_TEST
 	help
-	  If you say yes here you get support for the MUIC device of
-	  Maxim MAX77803 PMIC.
-	  The MAX77803 MUIC is a USB port accessory detector and switch.
+	  Say Y here to enable GPIO based USB cable detection extcon support.
+	  Used typically if GPIO is used for USB ID pin detection.
 
-config EXTCON_MAX77804K
-	tristate "MAX77804K EXTCON Support"
-	depends on MFD_MAX77804K
+config EXTCON_USBC_CROS_EC
+	tristate "ChromeOS Embedded Controller EXTCON support"
+	depends on MFD_CROS_EC
 	help
-	  If you say yes here you get support for the MUIC device of
-	  Maxim MAX77804K PMIC.
-	  The MAX77804K MUIC is a USB port accessory detector and switch.
+	  Say Y here to enable USB Type C cable detection extcon support when
+	  using Chrome OS EC based USB Type-C ports.
 
-config ADC_ONESHOT
-	bool "MAX77804K ADC ONESHOT MODE Support"
-	depends on EXTCON_MAX77804K
-	depends on !SEC_FACTORY
-	default n
-	help
-		Say Y here to enable ADC Oneshot mode when detecting ID value
-
-config MUIC_SUPPORT_AUDIO_DOCK
-	bool "MUIC_SUPPORT_AUDIO_DOCK"
-	default n
-	help
-	  If you say yes here you will get support for the audio dock.
-
-config MUIC_SUPPORT_DESK_DOCK
-	bool "MUIC_SUPPORT_DESK_DOCK"
-	default n
-	help
-	  If you say yes here you will get support for the desk dock.
-
-config MUIC_SUPPORT_SMART_DOCK
-	bool "MUIC_SUPPORT_SMART_DOCK"
-	default n
-	help
-	  If you say yes here you will get support for the smart dock.
-
-config MUIC_SUPPORT_MMD_CTL
-	bool "MUIC_SUPPORT_MMD_CTL"
-	default n
-	help
-	  If you say yes here you will get support for the smart dock enable func by keystring.
-
-config MUIC_SUPPORT_INCOMPATIBLE_CHARGER
-	bool "MUIC_SUPPORT_INCOMPATIBLE_CHARGER"
-	default n
-	help
-	  If you say yes here you will get support for the incompatible charger.
-
-config MUIC_MAX77804K_SUPPORT_LANHUB
-	bool "MUIC_MAX77804K_SUPPORT_LANHUB"
-	depends on !SEC_FACTORY
-	default n
-	help
-	  If you say yes here, you will get support for the LANHUB cable.
-
-config MUIC_SUPPORT_RUSTPROOF
-	bool "MUIC Disable UART"
-	depends on !SEC_FACTORY
-	default n
-	help
-	 This option will disable the UART to prevent the rusting of the
-	 IF Connector in the case of Kmini Devices.
-
-config USBID_STANDARD
-	bool "USBID_STANDARD"
-	default n
-	help
-	  If you say yes here you will get support for usbid standard.
-
-config EXTCON_ARIZONA
-	tristate "Wolfson Arizona EXTCON support"
-	depends on MFD_ARIZONA && INPUT
-	help
-	  Say Y here to enable support for external accessory detection
-	  with Wolfson Arizona devices. These are audio CODECs with
-	  advanced audio accessory detection support.
-
-endif # MULTISTATE_SWITCH
+endif

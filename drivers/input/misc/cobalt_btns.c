@@ -1,23 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Cobalt button interface driver.
  *
  *  Copyright (C) 2007-2008  Yoichi Yuasa <yuasa@linux-mips.org>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
-#include <linux/init.h>
 #include <linux/input-polldev.h>
 #include <linux/ioport.h>
 #include <linux/module.h>
@@ -73,7 +59,7 @@ static void handle_buttons(struct input_polled_dev *dev)
 	}
 }
 
-static int __devinit cobalt_buttons_probe(struct platform_device *pdev)
+static int cobalt_buttons_probe(struct platform_device *pdev)
 {
 	struct buttons_dev *bdev;
 	struct input_polled_dev *poll_dev;
@@ -131,11 +117,10 @@ static int __devinit cobalt_buttons_probe(struct platform_device *pdev)
  err_free_mem:
 	input_free_polled_device(poll_dev);
 	kfree(bdev);
-	dev_set_drvdata(&pdev->dev, NULL);
 	return error;
 }
 
-static int __devexit cobalt_buttons_remove(struct platform_device *pdev)
+static int cobalt_buttons_remove(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct buttons_dev *bdev = dev_get_drvdata(dev);
@@ -144,7 +129,6 @@ static int __devexit cobalt_buttons_remove(struct platform_device *pdev)
 	input_free_polled_device(bdev->poll_dev);
 	iounmap(bdev->reg);
 	kfree(bdev);
-	dev_set_drvdata(dev, NULL);
 
 	return 0;
 }
@@ -157,10 +141,9 @@ MODULE_ALIAS("platform:Cobalt buttons");
 
 static struct platform_driver cobalt_buttons_driver = {
 	.probe	= cobalt_buttons_probe,
-	.remove	= __devexit_p(cobalt_buttons_remove),
+	.remove	= cobalt_buttons_remove,
 	.driver	= {
 		.name	= "Cobalt buttons",
-		.owner	= THIS_MODULE,
 	},
 };
 module_platform_driver(cobalt_buttons_driver);

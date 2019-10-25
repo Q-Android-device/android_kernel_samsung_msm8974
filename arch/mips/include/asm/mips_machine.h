@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  Copyright (C) 2008-2010 Gabor Juhos <juhosg@openwrt.org>
- *
- *  This program is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License version 2 as published
- *  by the Free Software Foundation.
- *
  */
 
 #ifndef __ASM_MIPS_MACHINE_H
@@ -42,13 +38,9 @@ extern long __mips_machines_end;
 #ifdef CONFIG_MIPS_MACHINE
 int  mips_machtype_setup(char *id) __init;
 void mips_machine_setup(void) __init;
-void mips_set_machine_name(const char *name) __init;
-char *mips_get_machine_name(void);
 #else
 static inline int mips_machtype_setup(char *id) { return 1; }
 static inline void mips_machine_setup(void) { }
-static inline void mips_set_machine_name(const char *name) { }
-static inline char *mips_get_machine_name(void) { return NULL; }
 #endif /* CONFIG_MIPS_MACHINE */
 
 #endif /* __ASM_MIPS_MACHINE_H */

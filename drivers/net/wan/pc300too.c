@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Cyclades PC300 synchronous serial card driver for Linux
  *
  * Copyright (C) 2000-2008 Krzysztof Halasa <khc@pm.waw.pl>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License
- * as published by the Free Software Foundation.
  *
  * For information see <http://www.kernel.org/pub/linux/utils/net/hdlc/>.
  *
@@ -281,7 +278,6 @@ static void pc300_pci_remove_one(struct pci_dev *pdev)
 
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
-	pci_set_drvdata(pdev, NULL);
 	if (card->ports[0].netdev)
 		free_netdev(card->ports[0].netdev);
 	if (card->ports[1].netdev)
@@ -292,13 +288,12 @@ static void pc300_pci_remove_one(struct pci_dev *pdev)
 static const struct net_device_ops pc300_ops = {
 	.ndo_open       = pc300_open,
 	.ndo_stop       = pc300_close,
-	.ndo_change_mtu = hdlc_change_mtu,
 	.ndo_start_xmit = hdlc_start_xmit,
 	.ndo_do_ioctl   = pc300_ioctl,
 };
 
-static int __devinit pc300_pci_init_one(struct pci_dev *pdev,
-					const struct pci_device_id *ent)
+static int pc300_pci_init_one(struct pci_dev *pdev,
+			      const struct pci_device_id *ent)
 {
 	card_t *card;
 	u32 __iomem *p;
@@ -348,6 +343,7 @@ static int __devinit pc300_pci_init_one(struct pci_dev *pdev,
 	    card->rambase == NULL) {
 		pr_err("ioremap() failed\n");
 		pc300_pci_remove_one(pdev);
+		return -ENOMEM;
 	}
 
 	/* PLX PCI 9050 workaround for local configuration register read bug */
@@ -478,7 +474,7 @@ static int __devinit pc300_pci_init_one(struct pci_dev *pdev,
 
 
 
-static DEFINE_PCI_DEVICE_TABLE(pc300_pci_tbl) = {
+static const struct pci_device_id pc300_pci_tbl[] = {
 	{ PCI_VENDOR_ID_CYCLADES, PCI_DEVICE_ID_PC300_RX_1, PCI_ANY_ID,
 	  PCI_ANY_ID, 0, 0, 0 },
 	{ PCI_VENDOR_ID_CYCLADES, PCI_DEVICE_ID_PC300_RX_2, PCI_ANY_ID,

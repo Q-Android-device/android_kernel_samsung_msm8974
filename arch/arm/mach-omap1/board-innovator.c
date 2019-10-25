@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/arch/arm/mach-omap1/board-innovator.c
  *
@@ -10,10 +11,6 @@
  *
  * Separated FPGA interrupts from innovator1510.c and cleaned up for 2.6
  * Copyright (C) 2004 Nokia Corporation by Tony Lindrgen <tony@atomide.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/gpio.h>
 #include <linux/kernel.h>
@@ -31,18 +28,17 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 
-#include <plat/mux.h>
-#include <plat/flash.h>
-#include <plat/fpga.h>
-#include <plat/tc.h>
-#include <plat/usb.h>
-#include <plat/keypad.h>
-#include <plat/mmc.h>
+#include <mach/mux.h>
+#include "flash.h"
+#include <mach/tc.h>
+#include <linux/platform_data/keypad-omap.h>
 
 #include <mach/hardware.h>
+#include <mach/usb.h>
 
 #include "iomap.h"
 #include "common.h"
+#include "mmc.h"
 
 /* At OMAP1610 Innovator the Ethernet is directly connected to CS1 */
 #define INNOVATOR1610_ETHR_START	0x04000300
@@ -215,7 +211,7 @@ static struct platform_device *innovator1510_devices[] __initdata = {
 
 static int innovator_get_pendown_state(void)
 {
-	return !(fpga_read(OMAP1510_FPGA_TOUCHSCREEN) & (1 << 5));
+	return !(__raw_readb(OMAP1510_FPGA_TOUCHSCREEN) & (1 << 5));
 }
 
 static const struct ads7846_platform_data innovator1510_ts_info = {
@@ -279,7 +275,7 @@ static struct platform_device *innovator1610_devices[] __initdata = {
 static void __init innovator_init_smc91x(void)
 {
 	if (cpu_is_omap1510()) {
-		fpga_write(fpga_read(OMAP1510_FPGA_RST) & ~1,
+		__raw_writeb(__raw_readb(OMAP1510_FPGA_RST) & ~1,
 			   OMAP1510_FPGA_RST);
 		udelay(750);
 	} else {
@@ -303,7 +299,7 @@ static struct omap_usb_config innovator1510_usb_config __initdata = {
 	.pins[0]	= 2,
 };
 
-static struct omap_lcd_config innovator1510_lcd_config __initdata = {
+static const struct omap_lcd_config innovator1510_lcd_config __initconst = {
 	.ctrl_name	= "internal",
 };
 #endif
@@ -313,10 +309,10 @@ static struct omap_usb_config h2_usb_config __initdata = {
 	/* usb1 has a Mini-AB port and external isp1301 transceiver */
 	.otg		= 2,
 
-#ifdef	CONFIG_USB_GADGET_OMAP
+#if IS_ENABLED(CONFIG_USB_OMAP)
 	.hmc_mode	= 19,	/* 0:host(off) 1:dev|otg 2:disabled */
 	/* .hmc_mode	= 21,*/	/* 0:host(off) 1:dev(loopback) 2:host(loopback) */
-#elif	defined(CONFIG_USB_OHCI_HCD) || defined(CONFIG_USB_OHCI_HCD_MODULE)
+#elif	IS_ENABLED(CONFIG_USB_OHCI_HCD)
 	/* NONSTANDARD CABLE NEEDED (B-to-Mini-B) */
 	.hmc_mode	= 20,	/* 1:dev|otg(off) 1:host 2:disabled */
 #endif
@@ -324,21 +320,21 @@ static struct omap_usb_config h2_usb_config __initdata = {
 	.pins[1]	= 3,
 };
 
-static struct omap_lcd_config innovator1610_lcd_config __initdata = {
+static const struct omap_lcd_config innovator1610_lcd_config __initconst = {
 	.ctrl_name	= "internal",
 };
 #endif
 
-#if defined(CONFIG_MMC_OMAP) || defined(CONFIG_MMC_OMAP_MODULE)
+#if IS_ENABLED(CONFIG_MMC_OMAP)
 
 static int mmc_set_power(struct device *dev, int slot, int power_on,
 				int vdd)
 {
 	if (power_on)
-		fpga_write(fpga_read(OMAP1510_FPGA_POWER) | (1 << 3),
+		__raw_writeb(__raw_readb(OMAP1510_FPGA_POWER) | (1 << 3),
 				OMAP1510_FPGA_POWER);
 	else
-		fpga_write(fpga_read(OMAP1510_FPGA_POWER) & ~(1 << 3),
+		__raw_writeb(__raw_readb(OMAP1510_FPGA_POWER) & ~(1 << 3),
 				OMAP1510_FPGA_POWER);
 
 	return 0;
@@ -390,14 +386,14 @@ static void __init innovator_init(void)
 		omap_cfg_reg(UART3_TX);
 		omap_cfg_reg(UART3_RX);
 
-		reg = fpga_read(OMAP1510_FPGA_POWER);
+		reg = __raw_readb(OMAP1510_FPGA_POWER);
 		reg |= OMAP1510_FPGA_PCR_COM1_EN;
-		fpga_write(reg, OMAP1510_FPGA_POWER);
+		__raw_writeb(reg, OMAP1510_FPGA_POWER);
 		udelay(10);
 
-		reg = fpga_read(OMAP1510_FPGA_POWER);
+		reg = __raw_readb(OMAP1510_FPGA_POWER);
 		reg |= OMAP1510_FPGA_PCR_COM2_EN;
-		fpga_write(reg, OMAP1510_FPGA_POWER);
+		__raw_writeb(reg, OMAP1510_FPGA_POWER);
 		udelay(10);
 
 		platform_add_devices(innovator1510_devices, ARRAY_SIZE(innovator1510_devices));
@@ -437,6 +433,7 @@ static void __init innovator_init(void)
  */
 static void __init innovator_map_io(void)
 {
+#ifdef CONFIG_ARCH_OMAP15XX
 	omap15xx_map_io();
 
 	iotable_init(innovator1510_io_desc, ARRAY_SIZE(innovator1510_io_desc));
@@ -444,9 +441,10 @@ static void __init innovator_map_io(void)
 
 	/* Dump the Innovator FPGA rev early - useful info for support. */
 	pr_debug("Innovator FPGA Rev %d.%d Board Rev %d\n",
-			fpga_read(OMAP1510_FPGA_REV_HIGH),
-			fpga_read(OMAP1510_FPGA_REV_LOW),
-			fpga_read(OMAP1510_FPGA_BOARD_REV));
+			__raw_readb(OMAP1510_FPGA_REV_HIGH),
+			__raw_readb(OMAP1510_FPGA_REV_LOW),
+			__raw_readb(OMAP1510_FPGA_BOARD_REV));
+#endif
 }
 
 MACHINE_START(OMAP_INNOVATOR, "TI-Innovator")
@@ -454,9 +452,10 @@ MACHINE_START(OMAP_INNOVATOR, "TI-Innovator")
 	.atag_offset	= 0x100,
 	.map_io		= innovator_map_io,
 	.init_early     = omap1_init_early,
-	.reserve	= omap_reserve,
 	.init_irq	= omap1_init_irq,
+	.handle_irq	= omap1_handle_irq,
 	.init_machine	= innovator_init,
-	.timer		= &omap1_timer,
+	.init_late	= omap1_init_late,
+	.init_time	= omap1_timer_init,
 	.restart	= omap1_restart,
 MACHINE_END

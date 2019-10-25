@@ -271,7 +271,7 @@ static int sbc8360_open(struct inode *inode, struct file *file)
 	/* Activate and ping once to start the countdown */
 	sbc8360_activate();
 	sbc8360_ping();
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 static int sbc8360_close(struct inode *inode, struct file *file)
@@ -404,6 +404,5 @@ MODULE_AUTHOR("Ian E. Morgan <imorgan@webcon.ca>");
 MODULE_DESCRIPTION("SBC8360 watchdog driver");
 MODULE_LICENSE("GPL");
 MODULE_VERSION("1.01");
-MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);
 
 /* end of sbc8360.c */

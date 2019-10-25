@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * HP Quicksilver AGP GART routines
  *
@@ -6,11 +7,6 @@
  * Based on drivers/char/agpgart/hp-agp.c which is
  * (c) Copyright 2002, 2003 Hewlett-Packard Development Company, L.P.
  *	Bjorn Helgaas <bjorn.helgaas@hp.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/module.h>
@@ -129,7 +125,8 @@ parisc_agp_insert_memory(struct agp_memory *mem, off_t pg_start, int type)
 	off_t j, io_pg_start;
 	int io_pg_count;
 
-	if (type != 0 || mem->type != 0) {
+	if (type != mem->type ||
+		agp_bridge->driver->agp_type_to_mask_type(agp_bridge, type)) {
 		return -EINVAL;
 	}
 
@@ -175,7 +172,8 @@ parisc_agp_remove_memory(struct agp_memory *mem, off_t pg_start, int type)
 	struct _parisc_agp_info *info = &parisc_agp_info;
 	int i, io_pg_start, io_pg_count;
 
-	if (type != 0 || mem->type != 0) {
+	if (type != mem->type ||
+		agp_bridge->driver->agp_type_to_mask_type(agp_bridge, type)) {
 		return -EINVAL;
 	}
 
@@ -333,7 +331,7 @@ parisc_agp_setup(void __iomem *ioc_hpa, void __iomem *lba_hpa)
 	struct agp_bridge_data *bridge;
 	int error = 0;
 
-	fake_bridge_dev = alloc_pci_dev();
+	fake_bridge_dev = pci_alloc_dev(NULL);
 	if (!fake_bridge_dev) {
 		error = -ENOMEM;
 		goto fail;

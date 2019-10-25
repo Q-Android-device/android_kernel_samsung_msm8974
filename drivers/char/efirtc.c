@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * EFI Time Services Driver for Linux
  *
@@ -30,10 +31,10 @@
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/miscdevice.h>
-#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/rtc.h>
 #include <linux/proc_fs.h>
+#include <linux/seq_file.h>
 #include <linux/efi.h>
 #include <linux/uaccess.h>
 
@@ -255,35 +256,12 @@ static long efi_rtc_ioctl(struct file *file, unsigned int cmd,
 }
 
 /*
- *	We enforce only one user at a time here with the open/close.
- *	Also clear the previous interrupt data on an open, and clean
- *	up things on a close.
- */
-
-static int efi_rtc_open(struct inode *inode, struct file *file)
-{
-	/*
-	 * nothing special to do here
-	 * We do accept multiple open files at the same time as we
-	 * synchronize on the per call operation.
-	 */
-	return 0;
-}
-
-static int efi_rtc_close(struct inode *inode, struct file *file)
-{
-	return 0;
-}
-
-/*
  *	The various file operations we support.
  */
 
 static const struct file_operations efi_rtc_fops = {
 	.owner		= THIS_MODULE,
 	.unlocked_ioctl	= efi_rtc_ioctl,
-	.open		= efi_rtc_open,
-	.release	= efi_rtc_close,
 	.llseek		= no_llseek,
 };
 
@@ -296,12 +274,10 @@ static struct miscdevice efi_rtc_dev= {
 /*
  *	We export RAW EFI information to /proc/driver/efirtc
  */
-static int
-efi_rtc_get_status(char *buf)
+static int efi_rtc_proc_show(struct seq_file *m, void *v)
 {
 	efi_time_t 	eft, alm;
 	efi_time_cap_t	cap;
-	char		*p = buf;
 	efi_bool_t	enabled, pending;	
 	unsigned long	flags;
 
@@ -316,64 +292,50 @@ efi_rtc_get_status(char *buf)
 
 	spin_unlock_irqrestore(&efi_rtc_lock,flags);
 
-	p += sprintf(p,
-		     "Time           : %u:%u:%u.%09u\n"
-		     "Date           : %u-%u-%u\n"
-		     "Daylight       : %u\n",
-		     eft.hour, eft.minute, eft.second, eft.nanosecond, 
-		     eft.year, eft.month, eft.day,
-		     eft.daylight);
+	seq_printf(m,
+		   "Time           : %u:%u:%u.%09u\n"
+		   "Date           : %u-%u-%u\n"
+		   "Daylight       : %u\n",
+		   eft.hour, eft.minute, eft.second, eft.nanosecond, 
+		   eft.year, eft.month, eft.day,
+		   eft.daylight);
 
 	if (eft.timezone == EFI_UNSPECIFIED_TIMEZONE)
-		p += sprintf(p, "Timezone       : unspecified\n");
+		seq_puts(m, "Timezone       : unspecified\n");
 	else
 		/* XXX fixme: convert to string? */
-		p += sprintf(p, "Timezone       : %u\n", eft.timezone);
+		seq_printf(m, "Timezone       : %u\n", eft.timezone);
 		
 
-	p += sprintf(p,
-		     "Alarm Time     : %u:%u:%u.%09u\n"
-		     "Alarm Date     : %u-%u-%u\n"
-		     "Alarm Daylight : %u\n"
-		     "Enabled        : %s\n"
-		     "Pending        : %s\n",
-		     alm.hour, alm.minute, alm.second, alm.nanosecond, 
-		     alm.year, alm.month, alm.day, 
-		     alm.daylight,
-		     enabled == 1 ? "yes" : "no",
-		     pending == 1 ? "yes" : "no");
+	seq_printf(m,
+		   "Alarm Time     : %u:%u:%u.%09u\n"
+		   "Alarm Date     : %u-%u-%u\n"
+		   "Alarm Daylight : %u\n"
+		   "Enabled        : %s\n"
+		   "Pending        : %s\n",
+		   alm.hour, alm.minute, alm.second, alm.nanosecond, 
+		   alm.year, alm.month, alm.day, 
+		   alm.daylight,
+		   enabled == 1 ? "yes" : "no",
+		   pending == 1 ? "yes" : "no");
 
 	if (eft.timezone == EFI_UNSPECIFIED_TIMEZONE)
-		p += sprintf(p, "Timezone       : unspecified\n");
+		seq_puts(m, "Timezone       : unspecified\n");
 	else
 		/* XXX fixme: convert to string? */
-		p += sprintf(p, "Timezone       : %u\n", alm.timezone);
+		seq_printf(m, "Timezone       : %u\n", alm.timezone);
 
 	/*
 	 * now prints the capabilities
 	 */
-	p += sprintf(p,
-		     "Resolution     : %u\n"
-		     "Accuracy       : %u\n"
-		     "SetstoZero     : %u\n",
-		      cap.resolution, cap.accuracy, cap.sets_to_zero);
+	seq_printf(m,
+		   "Resolution     : %u\n"
+		   "Accuracy       : %u\n"
+		   "SetstoZero     : %u\n",
+		   cap.resolution, cap.accuracy, cap.sets_to_zero);
 
-	return  p - buf;
+	return 0;
 }
-
-static int
-efi_rtc_read_proc(char *page, char **start, off_t off,
-                                 int count, int *eof, void *data)
-{
-        int len = efi_rtc_get_status(page);
-        if (len <= off+count) *eof = 1;
-        *start = page + off;
-        len -= off;
-        if (len>count) len = count;
-        if (len<0) len = 0;
-        return len;
-}
-
 static int __init 
 efi_rtc_init(void)
 {
@@ -389,8 +351,7 @@ efi_rtc_init(void)
 		return ret;
 	}
 
-	dir = create_proc_read_entry ("driver/efirtc", 0, NULL,
-			              efi_rtc_read_proc, NULL);
+	dir = proc_create_single("driver/efirtc", 0, NULL, efi_rtc_proc_show);
 	if (dir == NULL) {
 		printk(KERN_ERR "efirtc: can't create /proc/driver/efirtc.\n");
 		misc_deregister(&efi_rtc_dev);
@@ -398,14 +359,8 @@ efi_rtc_init(void)
 	}
 	return 0;
 }
+device_initcall(efi_rtc_init);
 
-static void __exit
-efi_rtc_exit(void)
-{
-	/* not yet used */
-}
-
-module_init(efi_rtc_init);
-module_exit(efi_rtc_exit);
-
+/*
 MODULE_LICENSE("GPL");
+*/

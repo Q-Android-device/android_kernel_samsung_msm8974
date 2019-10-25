@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Support for Sharp SL-C6000x PDAs
  *  Model: (Tosa)
@@ -5,13 +6,9 @@
  *  Copyright (c) 2005 Dirk Opfer
  *
  *	Based on code written by Sharp/Lineo for 2.4 kernels
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
- *
  */
 
+#include <linux/clkdev.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
@@ -23,29 +20,32 @@
 #include <linux/mmc/host.h>
 #include <linux/mfd/tc6393xb.h>
 #include <linux/mfd/tmio.h>
-#include <linux/mtd/nand.h>
+#include <linux/mtd/rawnand.h>
 #include <linux/mtd/partitions.h>
 #include <linux/mtd/physmap.h>
 #include <linux/pm.h>
 #include <linux/gpio_keys.h>
 #include <linux/input.h>
 #include <linux/gpio.h>
-#include <linux/pda_power.h>
+#include <linux/gpio/machine.h>
+#include <linux/power/gpio-charger.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/pxa2xx_spi.h>
 #include <linux/input/matrix_keypad.h>
-#include <linux/i2c/pxa-i2c.h>
+#include <linux/platform_data/i2c-pxa.h>
 #include <linux/usb/gpio_vbus.h>
+#include <linux/reboot.h>
+#include <linux/memblock.h>
 
 #include <asm/setup.h>
 #include <asm/mach-types.h>
 
-#include <mach/pxa25x.h>
+#include "pxa25x.h"
 #include <mach/reset.h>
-#include <mach/irda.h>
-#include <mach/mmc.h>
-#include <mach/udc.h>
-#include <mach/tosa_bt.h>
+#include <linux/platform_data/irda-pxaficp.h>
+#include <linux/platform_data/mmc-pxamci.h>
+#include "udc.h"
+#include "tosa_bt.h"
 #include <mach/audio.h>
 #include <mach/smemc.h>
 
@@ -56,7 +56,6 @@
 #include <asm/mach/sharpsl_param.h>
 
 #include "generic.h"
-#include "clock.h"
 #include "devices.h"
 
 static unsigned long tosa_pin_config[] = {
@@ -289,9 +288,19 @@ static struct pxamci_platform_data tosa_mci_platform_data = {
 	.ocr_mask       	= MMC_VDD_32_33|MMC_VDD_33_34,
 	.init           	= tosa_mci_init,
 	.exit           	= tosa_mci_exit,
-	.gpio_card_detect	= TOSA_GPIO_nSD_DETECT,
-	.gpio_card_ro		= TOSA_GPIO_SD_WP,
-	.gpio_power		= TOSA_GPIO_PWR_ON,
+};
+
+static struct gpiod_lookup_table tosa_mci_gpio_table = {
+	.dev_id = "pxa2xx-mci.0",
+	.table = {
+		GPIO_LOOKUP("gpio-pxa", TOSA_GPIO_nSD_DETECT,
+			    "cd", GPIO_ACTIVE_LOW),
+		GPIO_LOOKUP("gpio-pxa", TOSA_GPIO_SD_WP,
+			    "wp", GPIO_ACTIVE_LOW),
+		GPIO_LOOKUP("gpio-pxa", TOSA_GPIO_PWR_ON,
+			    "power", GPIO_ACTIVE_HIGH),
+		{ },
+	},
 };
 
 /*
@@ -359,44 +368,17 @@ static struct pxaficp_platform_data tosa_ficp_platform_data = {
 /*
  * Tosa AC IN
  */
-static int tosa_power_init(struct device *dev)
-{
-	int ret = gpio_request(TOSA_GPIO_AC_IN, "ac in");
-	if (ret)
-		goto err_gpio_req;
-
-	ret = gpio_direction_input(TOSA_GPIO_AC_IN);
-	if (ret)
-		goto err_gpio_in;
-
-	return 0;
-
-err_gpio_in:
-	gpio_free(TOSA_GPIO_AC_IN);
-err_gpio_req:
-	return ret;
-}
-
-static void tosa_power_exit(struct device *dev)
-{
-	gpio_free(TOSA_GPIO_AC_IN);
-}
-
-static int tosa_power_ac_online(void)
-{
-	return gpio_get_value(TOSA_GPIO_AC_IN) == 0;
-}
-
 static char *tosa_ac_supplied_to[] = {
 	"main-battery",
 	"backup-battery",
 	"jacket-battery",
 };
 
-static struct pda_power_pdata tosa_power_data = {
-	.init			= tosa_power_init,
-	.is_ac_online		= tosa_power_ac_online,
-	.exit			= tosa_power_exit,
+static struct gpio_charger_platform_data tosa_power_data = {
+	.name			= "charger",
+	.type			= POWER_SUPPLY_TYPE_MAINS,
+	.gpio			= TOSA_GPIO_AC_IN,
+	.gpio_active_low	= 1,
 	.supplied_to		= tosa_ac_supplied_to,
 	.num_supplicants	= ARRAY_SIZE(tosa_ac_supplied_to),
 };
@@ -413,7 +395,7 @@ static struct resource tosa_power_resource[] = {
 };
 
 static struct platform_device tosa_power_device = {
-	.name			= "pda-power",
+	.name			= "gpio-charger",
 	.id			= -1,
 	.dev.platform_data	= &tosa_power_data,
 	.resource		= tosa_power_resource,
@@ -698,24 +680,6 @@ static int tosa_tc6393xb_suspend(struct platform_device *dev)
 	return 0;
 }
 
-static struct mtd_partition tosa_nand_partition[] = {
-	{
-		.name	= "smf",
-		.offset	= 0,
-		.size	= 7 * 1024 * 1024,
-	},
-	{
-		.name	= "root",
-		.offset	= MTDPART_OFS_APPEND,
-		.size	= 28 * 1024 * 1024,
-	},
-	{
-		.name	= "home",
-		.offset	= MTDPART_OFS_APPEND,
-		.size	= MTDPART_SIZ_FULL,
-	},
-};
-
 static uint8_t scan_ff_pattern[] = { 0xff, 0xff };
 
 static struct nand_bbt_descr tosa_tc6393xb_nand_bbt = {
@@ -725,10 +689,16 @@ static struct nand_bbt_descr tosa_tc6393xb_nand_bbt = {
 	.pattern	= scan_ff_pattern
 };
 
+static const char * const probes[] = {
+	"cmdlinepart",
+	"ofpart",
+	"sharpslpart",
+	NULL,
+};
+
 static struct tmio_nand_data tosa_tc6393xb_nand_config = {
-	.num_partitions	= ARRAY_SIZE(tosa_nand_partition),
-	.partition	= tosa_nand_partition,
 	.badblock_pattern = &tosa_tc6393xb_nand_bbt,
+	.part_parsers = probes,
 };
 
 static int tosa_tc6393xb_setup(struct platform_device *dev)
@@ -839,7 +809,7 @@ static struct platform_device tosa_bt_device = {
 	.dev.platform_data = &tosa_bt_data,
 };
 
-static struct pxa2xx_spi_master pxa_ssp_master_info = {
+static struct pxa2xx_spi_controller pxa_ssp_master_info = {
 	.num_chipselect	= 1,
 };
 
@@ -911,10 +881,10 @@ static struct platform_device *devices[] __initdata = {
 
 static void tosa_poweroff(void)
 {
-	pxa_restart('g', NULL);
+	pxa_restart(REBOOT_GPIO, NULL);
 }
 
-static void tosa_restart(char mode, const char *cmd)
+static void tosa_restart(enum reboot_mode mode, const char *cmd)
 {
 	uint32_t msc0 = __raw_readl(MSC0);
 
@@ -927,8 +897,6 @@ static void tosa_restart(char mode, const char *cmd)
 
 static void __init tosa_init(void)
 {
-	int dummy;
-
 	pxa2xx_mfp_config(ARRAY_AND_SIZE(tosa_pin_config));
 
 	pxa_set_ffuart_info(NULL);
@@ -947,10 +915,7 @@ static void __init tosa_init(void)
 	/* enable batt_fault */
 	PMCR = 0x01;
 
-	dummy = gpiochip_reserve(TOSA_SCOOP_GPIO_BASE, 12);
-	dummy = gpiochip_reserve(TOSA_SCOOP_JC_GPIO_BASE, 12);
-	dummy = gpiochip_reserve(TOSA_TC6393XB_GPIO_BASE, 16);
-
+	gpiod_add_lookup_table(&tosa_mci_gpio_table);
 	pxa_set_mci_info(&tosa_mci_platform_data);
 	pxa_set_ficp_info(&tosa_ficp_platform_data);
 	pxa_set_i2c_info(NULL);
@@ -965,23 +930,19 @@ static void __init tosa_init(void)
 	platform_add_devices(devices, ARRAY_SIZE(devices));
 }
 
-static void __init fixup_tosa(struct tag *tags, char **cmdline,
-			      struct meminfo *mi)
+static void __init fixup_tosa(struct tag *tags, char **cmdline)
 {
 	sharpsl_save_param();
-	mi->nr_banks=1;
-	mi->bank[0].start = 0xa0000000;
-	mi->bank[0].size = (64*1024*1024);
+	memblock_add(0xa0000000, SZ_64M);
 }
 
 MACHINE_START(TOSA, "SHARP Tosa")
-	.restart_mode	= 'g',
 	.fixup          = fixup_tosa,
 	.map_io         = pxa25x_map_io,
 	.nr_irqs	= TOSA_NR_IRQS,
 	.init_irq       = pxa25x_init_irq,
 	.handle_irq       = pxa25x_handle_irq,
 	.init_machine   = tosa_init,
-	.timer          = &pxa_timer,
+	.init_time	= pxa_timer_init,
 	.restart	= tosa_restart,
 MACHINE_END

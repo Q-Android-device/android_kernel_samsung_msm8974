@@ -1,19 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * arch/arm/mach-lpc32xx/include/mach/platform.h
  *
  * Author: Kevin Wells <kevin.wells@nxp.com>
  *
  * Copyright (C) 2010 NXP Semiconductors
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef __ASM_ARCH_PLATFORM_H
@@ -515,6 +506,7 @@
 /*
  * clkpwr_timers_pwms_clk_ctrl_1 register definitions
  */
+#define LPC32XX_CLKPWR_TMRPWMCLK_MPWM_EN	0x40
 #define LPC32XX_CLKPWR_TMRPWMCLK_TIMER3_EN	0x20
 #define LPC32XX_CLKPWR_TMRPWMCLK_TIMER2_EN	0x10
 #define LPC32XX_CLKPWR_TMRPWMCLK_TIMER1_EN	0x08
@@ -693,5 +685,19 @@
 #define LPC32XX_GPIO_P2_MUX_SET			_GPREG(0x028)
 #define LPC32XX_GPIO_P2_MUX_CLR			_GPREG(0x02C)
 #define LPC32XX_GPIO_P2_MUX_STATE		_GPREG(0x030)
+
+/*
+ * USB Otg Registers
+ */
+#define _OTGREG(x)			io_p2v(LPC32XX_USB_OTG_BASE + (x))
+#define LPC32XX_USB_OTG_CLK_CTRL	_OTGREG(0xFF4)
+#define LPC32XX_USB_OTG_CLK_STAT	_OTGREG(0xFF8)
+
+/* USB OTG CLK CTRL bit defines */
+#define LPC32XX_USB_OTG_AHB_M_CLOCK_ON	_BIT(4)
+#define LPC32XX_USB_OTG_OTG_CLOCK_ON	_BIT(3)
+#define LPC32XX_USB_OTG_I2C_CLOCK_ON	_BIT(2)
+#define LPC32XX_USB_OTG_DEV_CLOCK_ON	_BIT(1)
+#define LPC32XX_USB_OTG_HOST_CLOCK_ON	_BIT(0)
 
 #endif

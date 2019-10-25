@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) ST-Ericsson AB 2010
- * Author:	Sjur Brendeland/sjur.brandeland@stericsson.com
- * License terms: GNU General Public License (GPL) version 2
+ * Author:	Sjur Brendeland
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ":%s(): " fmt, __func__
@@ -42,15 +42,15 @@ struct cfmuxl {
 static int cfmuxl_receive(struct cflayer *layr, struct cfpkt *pkt);
 static int cfmuxl_transmit(struct cflayer *layr, struct cfpkt *pkt);
 static void cfmuxl_ctrlcmd(struct cflayer *layr, enum caif_ctrlcmd ctrl,
-				int phyid);
+			   int phyid);
 static struct cflayer *get_up(struct cfmuxl *muxl, u16 id);
 
 struct cflayer *cfmuxl_create(void)
 {
-	struct cfmuxl *this = kmalloc(sizeof(struct cfmuxl), GFP_ATOMIC);
+	struct cfmuxl *this = kzalloc(sizeof(struct cfmuxl), GFP_ATOMIC);
+
 	if (!this)
 		return NULL;
-	memset(this, 0, sizeof(*this));
 	this->layer.receive = cfmuxl_receive;
 	this->layer.transmit = cfmuxl_transmit;
 	this->layer.ctrlcmd = cfmuxl_ctrlcmd;
@@ -244,7 +244,7 @@ static int cfmuxl_transmit(struct cflayer *layr, struct cfpkt *pkt)
 }
 
 static void cfmuxl_ctrlcmd(struct cflayer *layr, enum caif_ctrlcmd ctrl,
-				int phyid)
+			   int phyid)
 {
 	struct cfmuxl *muxl = container_obj(layr);
 	struct cflayer *layer;

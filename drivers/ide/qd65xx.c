@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Copyright (C) 1996-2001  Linus Torvalds & author (see below)
  */
@@ -335,7 +336,7 @@ static const struct ide_port_ops qd6580_port_ops = {
 	.set_pio_mode		= qd6580_set_pio_mode,
 };
 
-static const struct ide_port_info qd65xx_port_info __initdata = {
+static const struct ide_port_info qd65xx_port_info __initconst = {
 	.name			= DRV_NAME,
 	.tp_ops 		= &qd65xx_tp_ops,
 	.chipset		= ide_qd65xx,

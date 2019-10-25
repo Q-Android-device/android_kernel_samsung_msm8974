@@ -1,22 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*-
  * Finger Sensing Pad PS/2 mouse driver.
  *
  * Copyright (C) 2005-2007 Asia Vital Components Co., Ltd.
  * Copyright (C) 2005-2012 Tai-hwa Liang, Sentelic Corporation.
- *
- *   This program is free software; you can redistribute it and/or
- *   modify it under the terms of the GNU General Public License
- *   as published by the Free Software Foundation; either version 2
- *   of the License, or (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #ifndef	__SENTELIC_H
@@ -64,6 +51,14 @@
 #define	FSP_BIT_SWC1_GST_GRP0	BIT(5)
 #define	FSP_BIT_SWC1_GST_GRP1	BIT(6)
 #define	FSP_BIT_SWC1_BX_COMPAT	BIT(7)
+
+#define	FSP_PAGE_0B		(0x0b)
+#define	FSP_PAGE_82		(0x82)
+#define	FSP_PAGE_DEFAULT	FSP_PAGE_82
+
+#define	FSP_REG_SN0		(0x40)
+#define	FSP_REG_SN1		(0x41)
+#define	FSP_REG_SN2		(0x42)
 
 /* Finger-sensing Pad packet formating related definitions */
 
@@ -115,11 +110,11 @@ struct fsp_data {
 extern int fsp_detect(struct psmouse *psmouse, bool set_properties);
 extern int fsp_init(struct psmouse *psmouse);
 #else
-inline int fsp_detect(struct psmouse *psmouse, bool set_properties)
+static inline int fsp_detect(struct psmouse *psmouse, bool set_properties)
 {
 	return -ENOSYS;
 }
-inline int fsp_init(struct psmouse *psmouse)
+static inline int fsp_init(struct psmouse *psmouse)
 {
 	return -ENOSYS;
 }

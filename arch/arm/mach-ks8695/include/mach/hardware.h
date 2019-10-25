@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * arch/arm/mach-ks8695/include/mach/hardware.h
  *
@@ -5,19 +6,15 @@
  * Copyright (C) 2006 Simtec Electronics
  *
  * KS8695 - Memory Map definitions
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
 */
 
 #ifndef __ASM_ARCH_HARDWARE_H
 #define __ASM_ARCH_HARDWARE_H
 
-#include <asm/sizes.h>
+#include <linux/sizes.h>
 
 /*
- * Clocks are derived from MCLK, which is 25Mhz
+ * Clocks are derived from MCLK, which is 25MHz
  */
 #define KS8695_CLOCK_RATE	25000000
 
@@ -33,7 +30,7 @@
  * head debug code as the initial MMU setup only deals in L1 sections.
  */
 #define KS8695_IO_PA		0x03F00000
-#define KS8695_IO_VA		0xF0000000
+#define KS8695_IO_VA		IOMEM(0xF0000000)
 #define KS8695_IO_SIZE		SZ_1M
 
 #define KS8695_PCIMEM_PA	0x60000000

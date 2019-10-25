@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * PQ2 ADS-style PCI interrupt controller
  *
@@ -6,17 +7,12 @@
  *
  * Loosely based on mpc82xx ADS support by Vitaly Bordug <vbordug@ru.mvista.com>
  * Copyright (c) 2006 MontaVista Software, Inc.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation.
  */
 
 #include <linux/init.h>
 #include <linux/spinlock.h>
 #include <linux/irq.h>
 #include <linux/types.h>
-#include <linux/bootmem.h>
 #include <linux/slab.h>
 
 #include <asm/io.h>
@@ -79,7 +75,7 @@ static struct irq_chip pq2ads_pci_ic = {
 	.irq_disable = pq2ads_pci_mask_irq
 };
 
-static void pq2ads_pci_irq_demux(unsigned int irq, struct irq_desc *desc)
+static void pq2ads_pci_irq_demux(struct irq_desc *desc)
 {
 	struct pq2ads_pci_pic *priv = irq_desc_get_handler_data(desc);
 	u32 stat, mask, pend;
@@ -132,7 +128,7 @@ int __init pq2ads_pci_init_irq(void)
 	}
 
 	irq = irq_of_parse_and_map(np, 0);
-	if (irq == NO_IRQ) {
+	if (!irq) {
 		printk(KERN_ERR "No interrupt in pci pic node.\n");
 		of_node_put(np);
 		goto out;
@@ -149,7 +145,7 @@ int __init pq2ads_pci_init_irq(void)
 	priv->regs = of_iomap(np, 0);
 	if (!priv->regs) {
 		printk(KERN_ERR "Cannot map PCI PIC registers.\n");
-		goto out_free_bootmem;
+		goto out_free_kmalloc;
 	}
 
 	/* mask all PCI interrupts */
@@ -171,9 +167,8 @@ int __init pq2ads_pci_init_irq(void)
 
 out_unmap_regs:
 	iounmap(priv->regs);
-out_free_bootmem:
-	free_bootmem((unsigned long)priv,
-	             sizeof(struct pq2ads_pci_pic));
+out_free_kmalloc:
+	kfree(priv);
 	of_node_put(np);
 out_unmap_irq:
 	irq_dispose_mapping(irq);

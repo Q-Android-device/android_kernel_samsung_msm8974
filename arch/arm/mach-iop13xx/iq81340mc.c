@@ -1,20 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * iq81340mc board support
  * Copyright (c) 2005-2006, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc., 59 Temple
- * Place - Suite 330, Boston, MA 02111-1307 USA.
- *
  */
 #include <linux/pci.h>
 
@@ -23,7 +10,7 @@
 #include <asm/mach/pci.h>
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
-#include <mach/pci.h>
+#include "pci.h"
 #include <asm/mach/time.h>
 #include <mach/time.h>
 
@@ -54,7 +41,6 @@ iq81340mc_pcix_map_irq(const struct pci_dev *dev, u8 idsel, u8 pin)
 }
 
 static struct hw_pci iq81340mc_pci __initdata = {
-	.swizzle	= pci_std_swizzle,
 	.nr_controllers = 0,
 	.setup		= iop13xx_pci_setup,
 	.map_irq	= iq81340mc_pcix_map_irq,
@@ -85,17 +71,14 @@ static void __init iq81340mc_timer_init(void)
 	iop_init_time(bus_freq);
 }
 
-static struct sys_timer iq81340mc_timer = {
-       .init       = iq81340mc_timer_init,
-};
-
 MACHINE_START(IQ81340MC, "Intel IQ81340MC")
 	/* Maintainer: Dan Williams <dan.j.williams@intel.com> */
 	.atag_offset    = 0x100,
 	.init_early     = iop13xx_init_early,
 	.map_io         = iop13xx_map_io,
 	.init_irq       = iop13xx_init_irq,
-	.timer          = &iq81340mc_timer,
+	.init_time	= iq81340mc_timer_init,
 	.init_machine   = iq81340mc_init,
 	.restart	= iop13xx_restart,
+	.nr_irqs	= NR_IOP13XX_IRQS,
 MACHINE_END

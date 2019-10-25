@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * arch/sh/drivers/dma/dma-sysfs.c
  *
  * sysfs interface for SH DMA API
  *
  * Copyright (C) 2004 - 2006  Paul Mundt
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -29,7 +26,7 @@ static ssize_t dma_show_devices(struct device *dev,
 	ssize_t len = 0;
 	int i;
 
-	for (i = 0; i < MAX_DMA_CHANNELS; i++) {
+	for (i = 0; i < 16; i++) {
 		struct dma_info *info = get_dma_info(i);
 		struct dma_channel *channel = get_dma_channel(i);
 

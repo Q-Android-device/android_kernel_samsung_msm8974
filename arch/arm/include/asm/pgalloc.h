@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  arch/arm/include/asm/pgalloc.h
  *
  *  Copyright (C) 2000-2001 Russell King
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #ifndef _ASMARM_PGALLOC_H
 #define _ASMARM_PGALLOC_H
@@ -29,7 +26,7 @@
 
 static inline pmd_t *pmd_alloc_one(struct mm_struct *mm, unsigned long addr)
 {
-	return (pmd_t *)get_zeroed_page(GFP_KERNEL | __GFP_REPEAT);
+	return (pmd_t *)get_zeroed_page(GFP_KERNEL);
 }
 
 static inline void pmd_free(struct mm_struct *mm, pmd_t *pmd)
@@ -57,7 +54,7 @@ static inline void pud_populate(struct mm_struct *mm, pud_t *pud, pmd_t *pmd)
 extern pgd_t *pgd_alloc(struct mm_struct *mm);
 extern void pgd_free(struct mm_struct *mm, pgd_t *pgd);
 
-#define PGALLOC_GFP	(GFP_KERNEL | __GFP_NOTRACK | __GFP_REPEAT | __GFP_ZERO)
+#define PGALLOC_GFP	(GFP_KERNEL | __GFP_ZERO)
 
 static inline void clean_pte_table(pte_t *pte)
 {
@@ -81,7 +78,7 @@ static inline void clean_pte_table(pte_t *pte)
  *  +------------+
  */
 static inline pte_t *
-pte_alloc_one_kernel(struct mm_struct *mm, unsigned long addr)
+pte_alloc_one_kernel(struct mm_struct *mm)
 {
 	pte_t *pte;
 
@@ -93,7 +90,7 @@ pte_alloc_one_kernel(struct mm_struct *mm, unsigned long addr)
 }
 
 static inline pgtable_t
-pte_alloc_one(struct mm_struct *mm, unsigned long addr)
+pte_alloc_one(struct mm_struct *mm)
 {
 	struct page *pte;
 
@@ -102,12 +99,14 @@ pte_alloc_one(struct mm_struct *mm, unsigned long addr)
 #else
 	pte = alloc_pages(PGALLOC_GFP, 0);
 #endif
-	if (pte) {
-		if (!PageHighMem(pte))
-			clean_pte_table(page_address(pte));
-		pgtable_page_ctor(pte);
+	if (!pte)
+		return NULL;
+	if (!PageHighMem(pte))
+		clean_pte_table(page_address(pte));
+	if (!pgtable_page_ctor(pte)) {
+		__free_page(pte);
+		return NULL;
 	}
-
 	return pte;
 }
 
@@ -130,55 +129,11 @@ static inline void __pmd_populate(pmd_t *pmdp, phys_addr_t pte,
 				  pmdval_t prot)
 {
 	pmdval_t pmdval = (pte + PTE_HWTABLE_OFF) | prot;
-#ifdef	CONFIG_TIMA_RKP_L1_TABLES
-	unsigned long cmd_id = 0x3f809221;
-	unsigned long tima_wr_out, pmd_base;
-#if __GNUC__ >= 4 && __GNUC_MINOR__ >= 6
-        __asm__ __volatile__(".arch_extension sec");
-#endif
-	clean_dcache_area(pmdp, 8);
-	__asm__ __volatile__ (
-		"stmfd  sp!,{r0, r8-r11}\n"
-		"mov   	r11, r0\n"
-		"mov    r0, %1\n"
-		"mov	r8, %2\n"
-		"mov    r9, %3\n"
-		"mov    r10, %4\n"
-		"mcr    p15, 0, r8, c7, c14, 1\n"
-		"add    r8, r8, #4\n"
-		"mcr    p15, 0, r8, c7, c14, 1\n"
-		"dsb\n"
-		"smc    #9\n"
-		"sub    r8, r8, #4\n"
-		"mcr    p15, 0, r8, c7, c6,  1\n"
-		"dsb\n"
-
-		"mov    %0, r10\n"
-		"add    r8, r8, #4\n"
-		"mcr    p15, 0, r8, c7, c6,  1\n"
-		"dsb\n"
-
-		"mov    r0, #0\n"
-		"mcr    p15, 0, r0, c8, c3, 0\n"
-		"dsb\n"
-		"isb\n"
-		"pop    {r0, r8-r11}\n"
-		:"=r"(tima_wr_out):"r"(cmd_id),"r"((unsigned long)pmdp),"r"(pmdval),"r"(__pmd(pmdval + 256 * sizeof(pte_t))):"r0","r8","r9","r10","r11","cc");
-#else
 	pmdp[0] = __pmd(pmdval);
 #ifndef CONFIG_ARM_LPAE
 	pmdp[1] = __pmd(pmdval + 256 * sizeof(pte_t));
 #endif
-#endif
 	flush_pmd_entry(pmdp);
-
-#ifdef	CONFIG_TIMA_RKP_L1_TABLES
-        pmd_base = ((unsigned long)pmdp) & (~0x3fff);
-        tima_verify_state(pmd_base, 0, 1, 2);
-        tima_verify_state(pmd_base + 0x1000, 0, 1, 2);
-        tima_verify_state(pmd_base + 0x2000, 0, 1, 2);
-        tima_verify_state(pmd_base + 0x3000, 0, 1, 2);
-#endif
 }
 
 /*
@@ -194,7 +149,6 @@ pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmdp, pte_t *ptep)
 	 * The pmd must be loaded with the physical address of the PTE table
 	 */
 	__pmd_populate(pmdp, __pa(ptep), _PAGE_KERNEL_TABLE);
-
 }
 
 static inline void

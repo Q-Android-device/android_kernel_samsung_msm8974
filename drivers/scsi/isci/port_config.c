@@ -57,7 +57,7 @@
 
 #define SCIC_SDS_MPC_RECONFIGURATION_TIMEOUT    (10)
 #define SCIC_SDS_APC_RECONFIGURATION_TIMEOUT    (10)
-#define SCIC_SDS_APC_WAIT_LINK_UP_NOTIFICATION  (250)
+#define SCIC_SDS_APC_WAIT_LINK_UP_NOTIFICATION  (1000)
 
 enum SCIC_SDS_APC_ACTIVITY {
 	SCIC_SDS_APC_SKIP_PHY,
@@ -291,7 +291,7 @@ sci_mpc_agent_validate_phy_configuration(struct isci_host *ihost,
 		 * Note: We have not moved the current phy_index so we will actually
 		 *       compare the startting phy with itself.
 		 *       This is expected and required to add the phy to the port. */
-		while (phy_index < SCI_MAX_PHYS) {
+		for (; phy_index < SCI_MAX_PHYS; phy_index++) {
 			if ((phy_mask & (1 << phy_index)) == 0)
 				continue;
 			sci_phy_get_sas_address(&ihost->phys[phy_index],
@@ -313,16 +313,15 @@ sci_mpc_agent_validate_phy_configuration(struct isci_host *ihost,
 			assigned_phy_mask |= (1 << phy_index);
 		}
 
-		phy_index++;
 	}
 
 	return sci_port_configuration_agent_validate_ports(ihost, port_agent);
 }
 
-static void mpc_agent_timeout(unsigned long data)
+static void mpc_agent_timeout(struct timer_list *t)
 {
 	u8 index;
-	struct sci_timer *tmr = (struct sci_timer *)data;
+	struct sci_timer *tmr = from_timer(tmr, t, timer);
 	struct sci_port_configuration_agent *port_agent;
 	struct isci_host *ihost;
 	unsigned long flags;
@@ -472,13 +471,9 @@ sci_apc_agent_validate_phy_configuration(struct isci_host *ihost,
  * down event or a link up event where we can not yet tell to which a phy
  * belongs.
  */
-static void sci_apc_agent_start_timer(
-	struct sci_port_configuration_agent *port_agent,
-	u32 timeout)
+static void sci_apc_agent_start_timer(struct sci_port_configuration_agent *port_agent,
+				      u32 timeout)
 {
-	if (port_agent->timer_pending)
-		sci_del_timer(&port_agent->timer);
-
 	port_agent->timer_pending = true;
 	sci_mod_timer(&port_agent->timer, timeout);
 }
@@ -658,10 +653,10 @@ static void sci_apc_agent_link_down(
 }
 
 /* configure the phys into ports when the timer fires */
-static void apc_agent_timeout(unsigned long data)
+static void apc_agent_timeout(struct timer_list *t)
 {
 	u32 index;
-	struct sci_timer *tmr = (struct sci_timer *)data;
+	struct sci_timer *tmr = from_timer(tmr, t, timer);
 	struct sci_port_configuration_agent *port_agent;
 	struct isci_host *ihost;
 	unsigned long flags;
@@ -689,6 +684,9 @@ static void apc_agent_timeout(unsigned long data)
 		sci_apc_agent_configure_ports(ihost, port_agent,
 						   &ihost->phys[index], false);
 	}
+
+	if (is_controller_start_complete(ihost))
+		sci_controller_transition_to_ready(ihost, SCI_SUCCESS);
 
 done:
 	spin_unlock_irqrestore(&ihost->scic_lock, flags);
@@ -723,6 +721,11 @@ void sci_port_configuration_agent_construct(
 		port_agent->phy_valid_port_range[index].min_index = 0;
 		port_agent->phy_valid_port_range[index].max_index = 0;
 	}
+}
+
+bool is_port_config_apc(struct isci_host *ihost)
+{
+	return ihost->port_agent.link_up_handler == sci_apc_agent_link_up;
 }
 
 enum sci_status sci_port_configuration_agent_initialize(

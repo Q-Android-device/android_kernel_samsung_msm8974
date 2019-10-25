@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Miscellaneous SoC-specific hooks.
  *
  *  Copyright (C) 2011 Texas Instruments Incorporated
  *  Author: Mark Salter <msalter@redhat.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
  */
 #include <linux/module.h>
 #include <linux/ctype.h>
@@ -80,7 +77,7 @@ int soc_mac_addr(unsigned int index, u8 *addr)
 		if (have_fuse_mac)
 			memcpy(addr, c6x_fuse_mac, 6);
 		else
-			random_ether_addr(addr);
+			eth_random_addr(addr);
 	}
 
 	/* adjust for specific EMAC device */

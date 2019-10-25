@@ -1,13 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Suspend support specific for mips.
  *
- * Licensed under the GPLv2
- *
  * Copyright (C) 2009 Lemote Inc.
  * Author: Hu Hongbing <huhb@lemote.com>
- *         Wu Zhangjin <wuzhangjin@gmail.com>
+ *	   Wu Zhangjin <wuzhangjin@gmail.com>
  */
-#include <asm/suspend.h>
+#include <asm/sections.h>
 #include <asm/fpu.h>
 #include <asm/dsp.h>
 

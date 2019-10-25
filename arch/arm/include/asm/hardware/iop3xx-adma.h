@@ -1,19 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright © 2006, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- *
  */
 #ifndef _ADMA_H
 #define _ADMA_H
@@ -391,36 +378,6 @@ static inline int iop_chan_zero_sum_slot_count(size_t len, int src_cnt,
 	slot_cnt += *slots_per_op;
 
 	return slot_cnt;
-}
-
-static inline int iop_desc_is_pq(struct iop_adma_desc_slot *desc)
-{
-	return 0;
-}
-
-static inline u32 iop_desc_get_dest_addr(struct iop_adma_desc_slot *desc,
-					struct iop_adma_chan *chan)
-{
-	union iop3xx_desc hw_desc = { .ptr = desc->hw_desc, };
-
-	switch (chan->device->id) {
-	case DMA0_ID:
-	case DMA1_ID:
-		return hw_desc.dma->dest_addr;
-	case AAU_ID:
-		return hw_desc.aau->dest_addr;
-	default:
-		BUG();
-	}
-	return 0;
-}
-
-
-static inline u32 iop_desc_get_qdest_addr(struct iop_adma_desc_slot *desc,
-					  struct iop_adma_chan *chan)
-{
-	BUG();
-	return 0;
 }
 
 static inline u32 iop_desc_get_byte_count(struct iop_adma_desc_slot *desc,

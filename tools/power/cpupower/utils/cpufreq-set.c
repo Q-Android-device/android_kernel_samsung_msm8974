@@ -1,7 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  (C) 2004-2009  Dominik Brodowski <linux@dominikbrodowski.de>
- *
- *  Licensed under the terms of the GNU GPL License version 2.
  */
 
 
@@ -16,16 +15,17 @@
 #include <getopt.h>
 
 #include "cpufreq.h"
+#include "cpuidle.h"
 #include "helpers/helpers.h"
 
 #define NORM_FREQ_LEN 32
 
 static struct option set_opts[] = {
-	{ .name = "min",	.has_arg = required_argument,	.flag = NULL,	.val = 'd'},
-	{ .name = "max",	.has_arg = required_argument,	.flag = NULL,	.val = 'u'},
-	{ .name = "governor",	.has_arg = required_argument,	.flag = NULL,	.val = 'g'},
-	{ .name = "freq",	.has_arg = required_argument,	.flag = NULL,	.val = 'f'},
-	{ .name = "related",	.has_arg = no_argument,		.flag = NULL,	.val='r'},
+	{"min",		required_argument,	NULL, 'd'},
+	{"max",		required_argument,	NULL, 'u'},
+	{"governor",	required_argument,	NULL, 'g'},
+	{"freq",	required_argument,	NULL, 'f'},
+	{"related",	no_argument,		NULL, 'r'},
 	{ },
 };
 
@@ -257,7 +257,7 @@ int cmd_freq_set(int argc, char **argv)
 				print_unknown_arg();
 				return -EINVAL;
 			}
-			if ((sscanf(optarg, "%s", gov)) != 1) {
+			if ((sscanf(optarg, "%19s", gov)) != 1) {
 				print_unknown_arg();
 				return -EINVAL;
 			}
@@ -295,7 +295,7 @@ int cmd_freq_set(int argc, char **argv)
 			struct cpufreq_affected_cpus *cpus;
 
 			if (!bitmask_isbitset(cpus_chosen, cpu) ||
-			    cpufreq_cpu_exists(cpu))
+			    cpupower_is_cpu_online(cpu) != 1)
 				continue;
 
 			cpus = cpufreq_get_related_cpus(cpu);
@@ -315,17 +315,16 @@ int cmd_freq_set(int argc, char **argv)
 	     cpu <= bitmask_last(cpus_chosen); cpu++) {
 
 		if (!bitmask_isbitset(cpus_chosen, cpu) ||
-		    cpufreq_cpu_exists(cpu))
+		    cpupower_is_cpu_online(cpu) != 1)
 			continue;
 
 		printf(_("Setting cpu: %d\n"), cpu);
 		ret = do_one_cpu(cpu, &new_pol, freq, policychange);
-		if (ret)
-			break;
+		if (ret) {
+			print_error();
+			return ret;
+		}
 	}
 
-	if (ret)
-		print_error();
-
-	return ret;
+	return 0;
 }

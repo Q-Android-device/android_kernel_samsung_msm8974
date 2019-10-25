@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * GHASH: digest algorithm for GCM (Galois/Counter Mode).
  *
@@ -6,31 +7,16 @@
  *   Author: Huang Ying <ying.huang@intel.com>
  *
  * The algorithm implementation is copied from gcm.c.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation.
  */
 
 #include <crypto/algapi.h>
 #include <crypto/gf128mul.h>
+#include <crypto/ghash.h>
 #include <crypto/internal/hash.h>
 #include <linux/crypto.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-
-#define GHASH_BLOCK_SIZE	16
-#define GHASH_DIGEST_SIZE	16
-
-struct ghash_ctx {
-	struct gf128mul_4k *gf128;
-};
-
-struct ghash_desc_ctx {
-	u8 buffer[GHASH_BLOCK_SIZE];
-	u32 bytes;
-};
 
 static int ghash_init(struct shash_desc *desc)
 {
@@ -66,9 +52,6 @@ static int ghash_update(struct shash_desc *desc,
 	struct ghash_desc_ctx *dctx = shash_desc_ctx(desc);
 	struct ghash_ctx *ctx = crypto_shash_ctx(desc->tfm);
 	u8 *dst = dctx->buffer;
-
-	if (!ctx->gf128)
-		return -ENOKEY;
 
 	if (dctx->bytes) {
 		int n = min(srclen, dctx->bytes);
@@ -122,9 +105,6 @@ static int ghash_final(struct shash_desc *desc, u8 *dst)
 	struct ghash_ctx *ctx = crypto_shash_ctx(desc->tfm);
 	u8 *buf = dctx->buffer;
 
-	if (!ctx->gf128)
-		return -ENOKEY;
-
 	ghash_flush(ctx, dctx);
 	memcpy(dst, buf, GHASH_BLOCK_SIZE);
 
@@ -149,11 +129,9 @@ static struct shash_alg ghash_alg = {
 		.cra_name		= "ghash",
 		.cra_driver_name	= "ghash-generic",
 		.cra_priority		= 100,
-		.cra_flags		= CRYPTO_ALG_TYPE_SHASH,
 		.cra_blocksize		= GHASH_BLOCK_SIZE,
 		.cra_ctxsize		= sizeof(struct ghash_ctx),
 		.cra_module		= THIS_MODULE,
-		.cra_list		= LIST_HEAD_INIT(ghash_alg.base.cra_list),
 		.cra_exit		= ghash_exit_tfm,
 	},
 };
@@ -168,9 +146,10 @@ static void __exit ghash_mod_exit(void)
 	crypto_unregister_shash(&ghash_alg);
 }
 
-module_init(ghash_mod_init);
+subsys_initcall(ghash_mod_init);
 module_exit(ghash_mod_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("GHASH Message Digest Algorithm");
-MODULE_ALIAS("ghash");
+MODULE_ALIAS_CRYPTO("ghash");
+MODULE_ALIAS_CRYPTO("ghash-generic");

@@ -32,8 +32,8 @@ Required properties:
 - operating-points-v2: phandle to the OPP operating points
 
 Optional properties:
-- sram: phandle to the On Chip Memory (OCMEM) that's present on some Snapdragon
-        SoCs. See Documentation/devicetree/bindings/sram/qcom,ocmem.yaml.
+- ocmem: phandle to the On Chip Memory (OCMEM) that's present on some Snapdragon
+         SoCs. See Documentation/devicetree/bindings/soc/qcom/qcom,ocmem.yaml.
 
 Example:
 
@@ -86,13 +86,13 @@ a3xx example with OCMEM support:
 		clocks = <&mmcc OXILI_GFX3D_CLK>,
 		         <&mmcc OXILICX_AHB_CLK>,
 		         <&mmcc OXILICX_AXI_CLK>;
-		sram = <&gmu_sram>;
+		ocmem = <&ocmem>;
 		power-domains = <&mmcc OXILICX_GDSC>;
 		operating-points-v2 = <&gpu_opp_table>;
 		iommus = <&gpu_iommu 0>;
 	};
 
-	ocmem@fdd00000 {
+	ocmem: ocmem@fdd00000 {
 		compatible = "qcom,msm8974-ocmem";
 
 		reg = <0xfdd00000 0x2000>,
@@ -108,9 +108,8 @@ a3xx example with OCMEM support:
 		#address-cells = <1>;
 		#size-cells = <1>;
 
-		gmu_sram: gmu-sram@0 {
+		gmu-sram@0 {
 			reg = <0x0 0x100000>;
-			ranges = <0 0 0xfec00000 0x100000>;
 		};
 	};
 };

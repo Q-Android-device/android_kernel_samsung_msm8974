@@ -1,15 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * PMU IRQ registration for the iop3xx xscale PMU families.
  * Copyright (C) 2010 Will Deacon, ARM Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/platform_device.h>
-#include <asm/pmu.h>
 #include <mach/irqs.h>
 
 static struct resource pmu_resource = {
@@ -25,8 +20,8 @@ static struct resource pmu_resource = {
 };
 
 static struct platform_device pmu_device = {
-	.name		= "arm-pmu",
-	.id		= ARM_PMU_DEVICE_CPU,
+	.name		= "xscale-pmu",
+	.id		= -1,
 	.resource	= &pmu_resource,
 	.num_resources	= 1,
 };

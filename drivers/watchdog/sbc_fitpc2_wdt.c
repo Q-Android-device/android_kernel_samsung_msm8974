@@ -75,7 +75,7 @@ static int fitpc2_wdt_open(struct inode *inode, struct file *file)
 
 	wdt_enable();
 
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 static ssize_t fitpc2_wdt_write(struct file *file, const char *data,
@@ -263,5 +263,3 @@ module_param(nowayout, bool, 0);
 MODULE_PARM_DESC(nowayout, "Watchdog cannot be stopped once started");
 
 MODULE_LICENSE("GPL");
-MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);
-

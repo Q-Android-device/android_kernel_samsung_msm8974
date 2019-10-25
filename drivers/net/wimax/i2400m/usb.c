@@ -1,26 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel Wireless WiMAX Connection 2400m
  * Linux driver model glue for USB device, reset & fw upload
  *
- *
  * Copyright (C) 2007-2008 Intel Corporation <linux-wimax@intel.com>
  * Inaky Perez-Gonzalez <inaky.perez-gonzalez@intel.com>
  * Yanir Lubetkin <yanirx.lubetkin@intel.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
- * 02110-1301, USA.
- *
  *
  * See i2400m-usb.h for a general description of this driver.
  *
@@ -210,6 +195,7 @@ retry:
 			msleep(10);	/* give the device some time */
 			goto retry;
 		}
+		/* fall through */
 	case -EINVAL:			/* while removing driver */
 	case -ENODEV:			/* dev disconnect ... */
 	case -ENOENT:			/* just ignore it */
@@ -346,9 +332,9 @@ static void i2400mu_get_drvinfo(struct net_device *net_dev,
 	struct i2400mu *i2400mu = container_of(i2400m, struct i2400mu, i2400m);
 	struct usb_device *udev = i2400mu->usb_dev;
 
-	strncpy(info->driver, KBUILD_MODNAME, sizeof(info->driver) - 1);
-	strncpy(info->fw_version,
-	        i2400m->fw_name ? : "", sizeof(info->fw_version) - 1);
+	strlcpy(info->driver, KBUILD_MODNAME, sizeof(info->driver));
+	strlcpy(info->fw_version, i2400m->fw_name ? : "",
+		sizeof(info->fw_version));
 	usb_make_path(udev, info->bus_info, sizeof(info->bus_info));
 }
 
@@ -467,12 +453,15 @@ int i2400mu_probe(struct usb_interface *iface,
 	struct i2400mu *i2400mu;
 	struct usb_device *usb_dev = interface_to_usbdev(iface);
 
+	if (iface->cur_altsetting->desc.bNumEndpoints < 4)
+		return -ENODEV;
+
 	if (usb_dev->speed != USB_SPEED_HIGH)
 		dev_err(dev, "device not connected as high speed\n");
 
 	/* Allocate instance [calls i2400m_netdev_setup() on it]. */
 	result = -ENOMEM;
-	net_dev = alloc_netdev(sizeof(*i2400mu), "wmx%d",
+	net_dev = alloc_netdev(sizeof(*i2400mu), "wmx%d", NET_NAME_UNKNOWN,
 			       i2400mu_netdev_setup);
 	if (net_dev == NULL) {
 		dev_err(dev, "no memory for network device instance\n");
@@ -698,7 +687,7 @@ int i2400mu_resume(struct usb_interface *iface)
 	d_fnstart(3, dev, "(iface %p)\n", iface);
 	rmb();		/* see i2400m->updown's documentation  */
 	if (i2400m->updown == 0) {
-		d_printf(1, dev, "fw was down, no resume neeed\n");
+		d_printf(1, dev, "fw was down, no resume needed\n");
 		goto out;
 	}
 	d_printf(1, dev, "fw was up, resuming\n");

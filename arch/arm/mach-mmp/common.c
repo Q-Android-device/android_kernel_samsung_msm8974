@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/arch/arm/mach-mmp/common.c
  *
  *  Code common to PXA168 processor lines
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/init.h>
@@ -15,8 +12,8 @@
 #include <asm/page.h>
 #include <asm/mach/map.h>
 #include <asm/system_misc.h>
-#include <mach/addr-map.h>
-#include <mach/cputype.h>
+#include "addr-map.h"
+#include "cputype.h"
 
 #include "common.h"
 
@@ -47,7 +44,7 @@ void __init mmp_map_io(void)
 	mmp_chip_id = __raw_readl(MMP_CHIPID);
 }
 
-void mmp_restart(char mode, const char *cmd)
+void mmp_restart(enum reboot_mode mode, const char *cmd)
 {
 	soft_restart(0);
 }

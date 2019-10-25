@@ -1,15 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Cryptographic API.
  *
  * DES & Triple DES EDE Cipher Algorithms.
  *
  * Copyright (c) 2005 Dag Arne Osvik <da@osvik.no>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
  */
 
 #include <asm/byteorder.h>
@@ -789,7 +784,7 @@ static int des_setkey(struct crypto_tfm *tfm, const u8 *key,
 	/* Expand to tmp */
 	ret = des_ekey(tmp, key);
 
-	if (unlikely(ret == 0) && (*flags & CRYPTO_TFM_REQ_WEAK_KEY)) {
+	if (unlikely(ret == 0) && (*flags & CRYPTO_TFM_REQ_FORBID_WEAK_KEYS)) {
 		*flags |= CRYPTO_TFM_RES_WEAK_KEY;
 		return -EINVAL;
 	}
@@ -859,26 +854,31 @@ static void des_decrypt(struct crypto_tfm *tfm, u8 *dst, const u8 *src)
  *   property.
  *
  */
-static int des3_ede_setkey(struct crypto_tfm *tfm, const u8 *key,
-			   unsigned int keylen)
+int __des3_ede_setkey(u32 *expkey, u32 *flags, const u8 *key,
+		      unsigned int keylen)
 {
-	const u32 *K = (const u32 *)key;
-	struct des3_ede_ctx *dctx = crypto_tfm_ctx(tfm);
-	u32 *expkey = dctx->expkey;
-	u32 *flags = &tfm->crt_flags;
+	int err;
 
-	if (unlikely(!((K[0] ^ K[2]) | (K[1] ^ K[3])) ||
-		     !((K[2] ^ K[4]) | (K[3] ^ K[5]))) &&
-		     (*flags & CRYPTO_TFM_REQ_WEAK_KEY)) {
-		*flags |= CRYPTO_TFM_RES_WEAK_KEY;
-		return -EINVAL;
-	}
+	err = __des3_verify_key(flags, key);
+	if (unlikely(err))
+		return err;
 
 	des_ekey(expkey, key); expkey += DES_EXPKEY_WORDS; key += DES_KEY_SIZE;
 	dkey(expkey, key); expkey += DES_EXPKEY_WORDS; key += DES_KEY_SIZE;
 	des_ekey(expkey, key);
 
 	return 0;
+}
+EXPORT_SYMBOL_GPL(__des3_ede_setkey);
+
+static int des3_ede_setkey(struct crypto_tfm *tfm, const u8 *key,
+			   unsigned int keylen)
+{
+	struct des3_ede_ctx *dctx = crypto_tfm_ctx(tfm);
+	u32 *flags = &tfm->crt_flags;
+	u32 *expkey = dctx->expkey;
+
+	return __des3_ede_setkey(expkey, flags, key, keylen);
 }
 
 static void des3_ede_encrypt(struct crypto_tfm *tfm, u8 *dst, const u8 *src)
@@ -943,65 +943,55 @@ static void des3_ede_decrypt(struct crypto_tfm *tfm, u8 *dst, const u8 *src)
 	d[1] = cpu_to_le32(L);
 }
 
-static struct crypto_alg des_alg = {
+static struct crypto_alg des_algs[2] = { {
 	.cra_name		=	"des",
+	.cra_driver_name	=	"des-generic",
+	.cra_priority		=	100,
 	.cra_flags		=	CRYPTO_ALG_TYPE_CIPHER,
 	.cra_blocksize		=	DES_BLOCK_SIZE,
 	.cra_ctxsize		=	sizeof(struct des_ctx),
 	.cra_module		=	THIS_MODULE,
 	.cra_alignmask		=	3,
-	.cra_list		=	LIST_HEAD_INIT(des_alg.cra_list),
 	.cra_u			=	{ .cipher = {
 	.cia_min_keysize	=	DES_KEY_SIZE,
 	.cia_max_keysize	=	DES_KEY_SIZE,
 	.cia_setkey		=	des_setkey,
 	.cia_encrypt		=	des_encrypt,
 	.cia_decrypt		=	des_decrypt } }
-};
-
-static struct crypto_alg des3_ede_alg = {
+}, {
 	.cra_name		=	"des3_ede",
+	.cra_driver_name	=	"des3_ede-generic",
+	.cra_priority		=	100,
 	.cra_flags		=	CRYPTO_ALG_TYPE_CIPHER,
 	.cra_blocksize		=	DES3_EDE_BLOCK_SIZE,
 	.cra_ctxsize		=	sizeof(struct des3_ede_ctx),
 	.cra_module		=	THIS_MODULE,
 	.cra_alignmask		=	3,
-	.cra_list		=	LIST_HEAD_INIT(des3_ede_alg.cra_list),
 	.cra_u			=	{ .cipher = {
 	.cia_min_keysize	=	DES3_EDE_KEY_SIZE,
 	.cia_max_keysize	=	DES3_EDE_KEY_SIZE,
 	.cia_setkey		=	des3_ede_setkey,
 	.cia_encrypt		=	des3_ede_encrypt,
 	.cia_decrypt		=	des3_ede_decrypt } }
-};
-
-MODULE_ALIAS("des3_ede");
+} };
 
 static int __init des_generic_mod_init(void)
 {
-	int ret = 0;
-
-	ret = crypto_register_alg(&des_alg);
-	if (ret < 0)
-		goto out;
-
-	ret = crypto_register_alg(&des3_ede_alg);
-	if (ret < 0)
-		crypto_unregister_alg(&des_alg);
-out:
-	return ret;
+	return crypto_register_algs(des_algs, ARRAY_SIZE(des_algs));
 }
 
 static void __exit des_generic_mod_fini(void)
 {
-	crypto_unregister_alg(&des3_ede_alg);
-	crypto_unregister_alg(&des_alg);
+	crypto_unregister_algs(des_algs, ARRAY_SIZE(des_algs));
 }
 
-module_init(des_generic_mod_init);
+subsys_initcall(des_generic_mod_init);
 module_exit(des_generic_mod_fini);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("DES & Triple DES EDE Cipher Algorithms");
 MODULE_AUTHOR("Dag Arne Osvik <da@osvik.no>");
-MODULE_ALIAS("des");
+MODULE_ALIAS_CRYPTO("des");
+MODULE_ALIAS_CRYPTO("des-generic");
+MODULE_ALIAS_CRYPTO("des3_ede");
+MODULE_ALIAS_CRYPTO("des3_ede-generic");

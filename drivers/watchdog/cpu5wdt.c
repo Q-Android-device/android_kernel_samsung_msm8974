@@ -1,22 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * sma cpu5 watchdog driver
  *
  * Copyright (C) 2003 Heiko Ronsdorf <hero@ihg.uni-duisburg.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
- *
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -27,7 +13,6 @@
 #include <linux/errno.h>
 #include <linux/miscdevice.h>
 #include <linux/fs.h>
-#include <linux/init.h>
 #include <linux/ioport.h>
 #include <linux/timer.h>
 #include <linux/completion.h>
@@ -70,7 +55,7 @@ static struct {
 
 /* generic helper functions */
 
-static void cpu5wdt_trigger(unsigned long unused)
+static void cpu5wdt_trigger(struct timer_list *unused)
 {
 	if (verbose > 2)
 		pr_debug("trigger at %i ticks\n", ticks);
@@ -141,7 +126,7 @@ static int cpu5wdt_open(struct inode *inode, struct file *file)
 {
 	if (test_and_set_bit(0, &cpu5wdt_device.inuse))
 		return -EBUSY;
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 static int cpu5wdt_release(struct inode *inode, struct file *file)
@@ -215,7 +200,7 @@ static struct miscdevice cpu5wdt_misc = {
 
 /* init/exit function */
 
-static int __devinit cpu5wdt_init(void)
+static int cpu5wdt_init(void)
 {
 	unsigned int val;
 	int err;
@@ -225,7 +210,7 @@ static int __devinit cpu5wdt_init(void)
 
 	init_completion(&cpu5wdt_device.stop);
 	cpu5wdt_device.queue = 0;
-	setup_timer(&cpu5wdt_device.timer, cpu5wdt_trigger, 0);
+	timer_setup(&cpu5wdt_device.timer, cpu5wdt_trigger, 0);
 	cpu5wdt_device.default_ticks = ticks;
 
 	if (!request_region(port, CPU5WDT_EXTENT, PFX)) {
@@ -256,16 +241,17 @@ no_port:
 	return err;
 }
 
-static int __devinit cpu5wdt_init_module(void)
+static int cpu5wdt_init_module(void)
 {
 	return cpu5wdt_init();
 }
 
-static void __devexit cpu5wdt_exit(void)
+static void cpu5wdt_exit(void)
 {
 	if (cpu5wdt_device.queue) {
 		cpu5wdt_device.queue = 0;
 		wait_for_completion(&cpu5wdt_device.stop);
+		del_timer(&cpu5wdt_device.timer);
 	}
 
 	misc_deregister(&cpu5wdt_misc);
@@ -274,7 +260,7 @@ static void __devexit cpu5wdt_exit(void)
 
 }
 
-static void __devexit cpu5wdt_exit_module(void)
+static void cpu5wdt_exit_module(void)
 {
 	cpu5wdt_exit();
 }
@@ -288,9 +274,8 @@ MODULE_AUTHOR("Heiko Ronsdorf <hero@ihg.uni-duisburg.de>");
 MODULE_DESCRIPTION("sma cpu5 watchdog driver");
 MODULE_SUPPORTED_DEVICE("sma cpu5 watchdog");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);
 
-module_param(port, int, 0);
+module_param_hw(port, int, ioport, 0);
 MODULE_PARM_DESC(port, "base address of watchdog card, default is 0x91");
 
 module_param(verbose, int, 0);

@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	Copyright (c) 2001 Maciej W. Rozycki
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License
- *	as published by the Free Software Foundation; either version
- *	2 of the License, or (at your option) any later version.
  */
 
 #include <linux/init.h>
@@ -205,7 +201,7 @@ static int __init ms02nv_init_one(ulong addr)
 	mtd->type = MTD_RAM;
 	mtd->flags = MTD_CAP_RAM;
 	mtd->size = fixsize;
-	mtd->name = (char *)ms02nv_name;
+	mtd->name = ms02nv_name;
 	mtd->owner = THIS_MODULE;
 	mtd->_read = ms02nv_read;
 	mtd->_write = ms02nv_write;

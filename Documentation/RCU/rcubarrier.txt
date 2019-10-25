@@ -70,18 +70,32 @@ in realtime kernels in order to avoid excessive scheduling latencies.
 
 rcu_barrier()
 
-We instead need the rcu_barrier() primitive. This primitive is similar
-to synchronize_rcu(), but instead of waiting solely for a grace
-period to elapse, it also waits for all outstanding RCU callbacks to
-complete. Pseudo-code using rcu_barrier() is as follows:
+We instead need the rcu_barrier() primitive.  Rather than waiting for
+a grace period to elapse, rcu_barrier() waits for all outstanding RCU
+callbacks to complete.  Please note that rcu_barrier() does -not- imply
+synchronize_rcu(), in particular, if there are no RCU callbacks queued
+anywhere, rcu_barrier() is within its rights to return immediately,
+without waiting for a grace period to elapse.
+
+Pseudo-code using rcu_barrier() is as follows:
 
    1. Prevent any new RCU callbacks from being posted.
    2. Execute rcu_barrier().
    3. Allow the module to be unloaded.
 
-Quick Quiz #1: Why is there no srcu_barrier()?
+There is also an srcu_barrier() function for SRCU, and you of course
+must match the flavor of rcu_barrier() with that of call_rcu().  If your
+module uses multiple flavors of call_rcu(), then it must also use multiple
+flavors of rcu_barrier() when unloading that module.  For example, if
+it uses call_rcu(), call_srcu() on srcu_struct_1, and call_srcu() on
+srcu_struct_2(), then the following three lines of code will be required
+when unloading:
 
-The rcutorture module makes use of rcu_barrier in its exit function
+ 1 rcu_barrier();
+ 2 srcu_barrier(&srcu_struct_1);
+ 3 srcu_barrier(&srcu_struct_2);
+
+The rcutorture module makes use of rcu_barrier() in its exit function
 as follows:
 
  1 static void
@@ -162,7 +176,7 @@ for any pre-existing callbacks to complete.
 Then lines 55-62 print status and do operation-specific cleanup, and
 then return, permitting the module-unload operation to be completed.
 
-Quick Quiz #2: Is there any other situation where rcu_barrier() might
+Quick Quiz #1: Is there any other situation where rcu_barrier() might
 	be required?
 
 Your module might have additional complications. For example, if your
@@ -170,12 +184,12 @@ module invokes call_rcu() from timers, you will need to first cancel all
 the timers, and only then invoke rcu_barrier() to wait for any remaining
 RCU callbacks to complete.
 
-Of course, if you module uses call_rcu_bh(), you will need to invoke
-rcu_barrier_bh() before unloading.  Similarly, if your module uses
-call_rcu_sched(), you will need to invoke rcu_barrier_sched() before
-unloading.  If your module uses call_rcu(), call_rcu_bh(), -and-
-call_rcu_sched(), then you will need to invoke each of rcu_barrier(),
-rcu_barrier_bh(), and rcu_barrier_sched().
+Of course, if you module uses call_rcu(), you will need to invoke
+rcu_barrier() before unloading.  Similarly, if your module uses
+call_srcu(), you will need to invoke srcu_barrier() before unloading,
+and on the same srcu_struct structure.  If your module uses call_rcu()
+-and- call_srcu(), then you will need to invoke rcu_barrier() -and-
+srcu_barrier().
 
 
 Implementing rcu_barrier()
@@ -208,8 +222,8 @@ shown below. Note that the final "1" in on_each_cpu()'s argument list
 ensures that all the calls to rcu_barrier_func() will have completed
 before on_each_cpu() returns. Line 9 then waits for the completion.
 
-This code was rewritten in 2008 to support rcu_barrier_bh() and
-rcu_barrier_sched() in addition to the original rcu_barrier().
+This code was rewritten in 2008 and several times thereafter, but this
+still gives the general idea.
 
 The rcu_barrier_func() runs on each CPU, where it invokes call_rcu()
 to post an RCU callback, as follows:
@@ -242,11 +256,16 @@ reaches zero, as follows:
  4 complete(&rcu_barrier_completion);
  5 }
 
-Quick Quiz #3: What happens if CPU 0's rcu_barrier_func() executes
+Quick Quiz #2: What happens if CPU 0's rcu_barrier_func() executes
 	immediately (thus incrementing rcu_barrier_cpu_count to the
 	value one), but the other CPU's rcu_barrier_func() invocations
 	are delayed for a full grace period? Couldn't this result in
 	rcu_barrier() returning prematurely?
+
+The current rcu_barrier() implementation is more complex, due to the need
+to avoid disturbing idle CPUs (especially on battery-powered systems)
+and the need to minimally disturb non-idle CPUs in real-time systems.
+However, the code above illustrates the concepts.
 
 
 rcu_barrier() Summary
@@ -259,12 +278,7 @@ so that your module may be safely unloaded.
 
 Answers to Quick Quizzes
 
-Quick Quiz #1: Why is there no srcu_barrier()?
-
-Answer: Since there is no call_srcu(), there can be no outstanding SRCU
-	callbacks. Therefore, there is no need to wait for them.
-
-Quick Quiz #2: Is there any other situation where rcu_barrier() might
+Quick Quiz #1: Is there any other situation where rcu_barrier() might
 	be required?
 
 Answer: Interestingly enough, rcu_barrier() was not originally
@@ -278,7 +292,7 @@ Answer: Interestingly enough, rcu_barrier() was not originally
 	implementing rcutorture, and found that rcu_barrier() solves
 	this problem as well.
 
-Quick Quiz #3: What happens if CPU 0's rcu_barrier_func() executes
+Quick Quiz #2: What happens if CPU 0's rcu_barrier_func() executes
 	immediately (thus incrementing rcu_barrier_cpu_count to the
 	value one), but the other CPU's rcu_barrier_func() invocations
 	are delayed for a full grace period? Couldn't this result in

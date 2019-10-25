@@ -1,22 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   Additional mixer mapping
  *
  *   Copyright (c) 2002 by Takashi Iwai <tiwai@suse.de>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 struct usbmix_dB_map {
@@ -107,8 +93,10 @@ static struct usbmix_name_map extigy_map[] = {
  * e.g. no Master and fake PCM volume
  *			Pavel Mihaylov <bin@bash.info>
  */
-static struct usbmix_dB_map mp3plus_dB_1 = {-4781, 0};	/* just guess */
-static struct usbmix_dB_map mp3plus_dB_2 = {-1781, 618}; /* just guess */
+static struct usbmix_dB_map mp3plus_dB_1 = {.min = -4781, .max = 0};
+						/* just guess */
+static struct usbmix_dB_map mp3plus_dB_2 = {.min = -1781, .max = 618};
+						/* just guess */
 
 static struct usbmix_name_map mp3plus_map[] = {
 	/* 1: IT pcm */
@@ -176,6 +164,20 @@ static struct usbmix_name_map audigy2nx_map[] = {
 	{ 29, "Digital Out Source" }, /* SU */
 	{ 30, "Headphone Playback" }, /* FU */
 	{ 31, "Headphone Source" }, /* SU */
+	{ 0 } /* terminator */
+};
+
+static struct usbmix_name_map mbox1_map[] = {
+	{ 1, "Clock" },
+	{ 0 } /* terminator */
+};
+
+static struct usbmix_selector_map c400_selectors[] = {
+	{
+		.id = 0x80,
+		.count = 2,
+		.names = (const char*[]) {"Internal", "SPDIF"}
+	},
 	{ 0 } /* terminator */
 };
 
@@ -288,6 +290,15 @@ static struct usbmix_name_map scratch_live_map[] = {
 	{ 0 } /* terminator */
 };
 
+static struct usbmix_name_map ebox44_map[] = {
+	{ 4, NULL }, /* FU */
+	{ 6, NULL }, /* MU */
+	{ 7, NULL }, /* FU */
+	{ 10, NULL }, /* FU */
+	{ 11, NULL }, /* MU */
+	{ 0 }
+};
+
 /* "Gamesurround Muse Pocket LT" looks same like "Sound Blaster MP3+"
  *  most importand difference is SU[8], it should be set to "Capture Source"
  *  to make alsamixer and PA working properly.
@@ -304,6 +315,12 @@ static struct usbmix_name_map hercules_usb51_map[] = {
 	{ 0 }				/* terminator */
 };
 
+/* Plantronics Gamecom 780 has a broken volume control, better to disable it */
+static struct usbmix_name_map gamecom780_map[] = {
+	{ 9, NULL }, /* FU, speaker out */
+	{}
+};
+
 /* some (all?) SCMS USB3318 devices are affected by a firmware lock up
  * when anything attempts to access FU 10 (control)
  */
@@ -317,6 +334,19 @@ static struct usbmix_dB_map bose_companion5_dB = {-5006, -6};
 static struct usbmix_name_map bose_companion5_map[] = {
 	{ 3, NULL, .dB = &bose_companion5_dB },
 	{ 0 }	/* terminator */
+};
+
+/*
+ * Dell usb dock with ALC4020 codec had a firmware problem where it got
+ * screwed up when zero volume is passed; just skip it as a workaround
+ *
+ * Also the extension unit gives an access error, so skip it as well.
+ */
+static const struct usbmix_name_map dell_alc4020_map[] = {
+	{ 4, NULL },	/* extension unit */
+	{ 16, NULL },
+	{ 19, NULL },
+	{ 0 }
 };
 
 /*
@@ -347,6 +377,18 @@ static struct usbmix_ctl_map usbmix_ctl_maps[] = {
 		.map = audigy2nx_map,
 		.selector_map = audigy2nx_selectors,
 	},
+	{	/* Logitech, Inc. QuickCam Pro for Notebooks */
+		.id = USB_ID(0x046d, 0x0991),
+		.ignore_ctl_error = 1,
+	},
+	{	/* Logitech, Inc. QuickCam E 3500 */
+		.id = USB_ID(0x046d, 0x09a4),
+		.ignore_ctl_error = 1,
+	},
+	{	/* Plantronics GameCom 780 */
+		.id = USB_ID(0x047f, 0xc010),
+		.map = gamecom780_map,
+	},
 	{
 		/* Hercules DJ Console (Windows Edition) */
 		.id = USB_ID(0x06f8, 0xb000),
@@ -363,6 +405,14 @@ static struct usbmix_ctl_map usbmix_ctl_maps[] = {
 		 */
 		.id = USB_ID(0x06f8, 0xc000),
 		.map = hercules_usb51_map,
+	},
+	{
+		.id = USB_ID(0x0763, 0x2030),
+		.selector_map = c400_selectors,
+	},
+	{
+		.id = USB_ID(0x0763, 0x2031),
+		.selector_map = c400_selectors,
 	},
 	{
 		.id = USB_ID(0x08bb, 0x2702),
@@ -382,9 +432,21 @@ static struct usbmix_ctl_map usbmix_ctl_maps[] = {
 		.map = aureon_51_2_map,
 	},
 	{
+		.id = USB_ID(0x0bda, 0x4014),
+		.map = dell_alc4020_map,
+	},
+	{
+		.id = USB_ID(0x0dba, 0x1000),
+		.map = mbox1_map,
+	},
+	{
 		.id = USB_ID(0x13e5, 0x0001),
 		.map = scratch_live_map,
 		.ignore_ctl_error = 1,
+	},
+	{
+		.id = USB_ID(0x200c, 0x1018),
+		.map = ebox44_map,
 	},
 	{
 		/* MAYA44 USB+ */
@@ -409,3 +471,68 @@ static struct usbmix_ctl_map usbmix_ctl_maps[] = {
 	{ 0 } /* terminator */
 };
 
+/*
+ * Control map entries for UAC3 BADD profiles
+ */
+
+static struct usbmix_name_map uac3_badd_generic_io_map[] = {
+	{ UAC3_BADD_FU_ID2, "Generic Out Playback" },
+	{ UAC3_BADD_FU_ID5, "Generic In Capture" },
+	{ 0 }					/* terminator */
+};
+static struct usbmix_name_map uac3_badd_headphone_map[] = {
+	{ UAC3_BADD_FU_ID2, "Headphone Playback" },
+	{ 0 }					/* terminator */
+};
+static struct usbmix_name_map uac3_badd_speaker_map[] = {
+	{ UAC3_BADD_FU_ID2, "Speaker Playback" },
+	{ 0 }					/* terminator */
+};
+static struct usbmix_name_map uac3_badd_microphone_map[] = {
+	{ UAC3_BADD_FU_ID5, "Mic Capture" },
+	{ 0 }					/* terminator */
+};
+/* Covers also 'headset adapter' profile */
+static struct usbmix_name_map uac3_badd_headset_map[] = {
+	{ UAC3_BADD_FU_ID2, "Headset Playback" },
+	{ UAC3_BADD_FU_ID5, "Headset Capture" },
+	{ UAC3_BADD_FU_ID7, "Sidetone Mixing" },
+	{ 0 }					/* terminator */
+};
+static struct usbmix_name_map uac3_badd_speakerphone_map[] = {
+	{ UAC3_BADD_FU_ID2, "Speaker Playback" },
+	{ UAC3_BADD_FU_ID5, "Mic Capture" },
+	{ 0 }					/* terminator */
+};
+
+static struct usbmix_ctl_map uac3_badd_usbmix_ctl_maps[] = {
+	{
+		.id = UAC3_FUNCTION_SUBCLASS_GENERIC_IO,
+		.map = uac3_badd_generic_io_map,
+	},
+	{
+		.id = UAC3_FUNCTION_SUBCLASS_HEADPHONE,
+		.map = uac3_badd_headphone_map,
+	},
+	{
+		.id = UAC3_FUNCTION_SUBCLASS_SPEAKER,
+		.map = uac3_badd_speaker_map,
+	},
+	{
+		.id = UAC3_FUNCTION_SUBCLASS_MICROPHONE,
+		.map = uac3_badd_microphone_map,
+	},
+	{
+		.id = UAC3_FUNCTION_SUBCLASS_HEADSET,
+		.map = uac3_badd_headset_map,
+	},
+	{
+		.id = UAC3_FUNCTION_SUBCLASS_HEADSET_ADAPTER,
+		.map = uac3_badd_headset_map,
+	},
+	{
+		.id = UAC3_FUNCTION_SUBCLASS_SPEAKERPHONE,
+		.map = uac3_badd_speakerphone_map,
+	},
+	{ 0 } /* terminator */
+};

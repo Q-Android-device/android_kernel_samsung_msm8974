@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __ASM_ARM_CP15_H
 #define __ASM_ARM_CP15_H
 
@@ -23,6 +24,11 @@
 #define CR_RR	(1 << 14)	/* Round Robin cache replacement	*/
 #define CR_L4	(1 << 15)	/* LDR pc can set T bit			*/
 #define CR_DT	(1 << 16)
+#ifdef CONFIG_MMU
+#define CR_HA	(1 << 17)	/* Hardware management of Access Flag   */
+#else
+#define CR_BR	(1 << 17)	/* MPU Background region enable (PMSA)  */
+#endif
 #define CR_IT	(1 << 18)
 #define CR_ST	(1 << 19)
 #define CR_FI	(1 << 21)	/* Fast interrupt (lower latency mode)	*/
@@ -37,138 +43,62 @@
 #ifndef __ASSEMBLY__
 
 #if __LINUX_ARM_ARCH__ >= 4
-#define vectors_high()	(cr_alignment & CR_V)
+#define vectors_high()	(get_cr() & CR_V)
 #else
 #define vectors_high()	(0)
 #endif
 
-extern unsigned long cr_no_alignment;	/* defined in entry-armv.S */
+#ifdef CONFIG_CPU_CP15
+
+#define __ACCESS_CP15(CRn, Op1, CRm, Op2)	\
+	"mrc", "mcr", __stringify(p15, Op1, %0, CRn, CRm, Op2), u32
+#define __ACCESS_CP15_64(Op1, CRm)		\
+	"mrrc", "mcrr", __stringify(p15, Op1, %Q0, %R0, CRm), u64
+
+#define __read_sysreg(r, w, c, t) ({				\
+	t __val;						\
+	asm volatile(r " " c : "=r" (__val));			\
+	__val;							\
+})
+#define read_sysreg(...)		__read_sysreg(__VA_ARGS__)
+
+#define __write_sysreg(v, r, w, c, t)	asm volatile(w " " c : : "r" ((t)(v)))
+#define write_sysreg(v, ...)		__write_sysreg(v, __VA_ARGS__)
+
+#define BPIALL				__ACCESS_CP15(c7, 0, c5, 6)
+#define ICIALLU				__ACCESS_CP15(c7, 0, c5, 0)
+
+#define CNTVCT				__ACCESS_CP15_64(1, c14)
+
 extern unsigned long cr_alignment;	/* defined in entry-armv.S */
 
-static inline unsigned int get_cr(void)
+static inline unsigned long get_cr(void)
 {
-	unsigned int val;
+	unsigned long val;
 	asm("mrc p15, 0, %0, c1, c0, 0	@ get CR" : "=r" (val) : : "cc");
 	return val;
 }
 
-#ifdef CONFIG_TIMA_RKP
- 
-void tima_dump_log2(void);
-void tima_verify_state(unsigned long pmdp, unsigned long val, unsigned long rd_only, unsigned long caller);
-int tima_is_pg_protected(unsigned long va);
-
-#define BUILD_CMD_ID(cmdid) ((0x3f8<<20)|(cmdid <<12)|0x221)
-
-static inline void tima_send_cmd (unsigned int r2val, unsigned int cmdid)
-{
-    volatile unsigned int tima_cmdid = BUILD_CMD_ID(cmdid);
-	asm volatile (
-#if __GNUC__ >= 4 && __GNUC_MINOR__ >= 6
-        ".arch_extension sec\n"
-#endif	
-	    "stmfd   sp!, {r0-r3, r11}\n"
-        "mov     r11, r0\n"
-        "mov     r2, %0\n" 
-		"mov     r0, %1\n"
-		"smc     #1\n" 
-        "ldmfd   sp!, {r0-r3, r11}" : : "r" (r2val), "r" (tima_cmdid) : "r0","r2","cc");
-}
-static inline void tima_send_cmd2 (unsigned int p1, unsigned int p2, unsigned int cmdid)
-{
-    volatile unsigned int tima_cmdid = BUILD_CMD_ID(cmdid);
-	asm volatile (
-#if __GNUC__ >= 4 && __GNUC_MINOR__ >= 6
-        ".arch_extension sec\n"
-#endif	
-	"stmfd   sp!, {r0-r3, r11}\n"
-        "mov     r11, r0\n"
-        "mov     r2, %0\n"
-	"mov     r3, %1\n"  
-	"mov     r0, %2\n"
-	"smc     #1\n" 
-        "ldmfd   sp!, {r0-r3, r11}" : : "r" (p1), "r" (p2), "r" (tima_cmdid) : "r0","r2","r3","cc");
-}
-static inline void tima_send_cmd3 (unsigned int p1, unsigned int p2, unsigned int p3, unsigned int cmdid)
-{
-    volatile unsigned int tima_cmdid = BUILD_CMD_ID(cmdid);
-	asm volatile (
-#if __GNUC__ >= 4 && __GNUC_MINOR__ >= 6
-        ".arch_extension sec\n"
-#endif	
-	"stmfd   sp!, {r0-r4, r11}\n"
-        "mov     r11, r0\n"
-        "mov     r2, %0\n"
-	"mov     r3, %1\n"  
-	"mov     r4, %2\n"  
-	"mov     r0, %3\n"
-	"smc     #1\n" 
-        "ldmfd   sp!, {r0-r4, r11}" : : "r" (p1), "r" (p2), "r" (p3), "r" (tima_cmdid) : "r0","r2","r3","r4","cc");
-}
-static inline void tima_send_cmd4 (unsigned int p1, unsigned int p2, unsigned int p3, unsigned int p4, unsigned int cmdid)
-{
-    volatile unsigned int tima_cmdid = BUILD_CMD_ID(cmdid);
-	asm volatile (
-#if __GNUC__ >= 4 && __GNUC_MINOR__ >= 6
-        ".arch_extension sec\n"
-#endif	
-	"stmfd   sp!, {r0-r5, r11}\n"
-        "mov     r11, r0\n"
-        "mov     r2, %0\n"
-	"mov     r3, %1\n"  
-	"mov     r4, %2\n"  
-	"mov     r5, %3\n"  
-	"mov     r0, %4\n"
-	"smc     #1\n" 
-        "ldmfd   sp!, {r0-r5, r11}" : : "r" (p1), "r" (p2), "r" (p3), "r" (p4), "r" (tima_cmdid) : "r0","r2","r3","r4","r5","cc");
-}
-
-static inline void tima_send_cmd5 (unsigned int p1, unsigned int p2, unsigned int p3, unsigned int p4, unsigned int p5,unsigned int cmdid)
-{
-    volatile unsigned int tima_cmdid = BUILD_CMD_ID(cmdid);
-	asm volatile (
-#if __GNUC__ >= 4 && __GNUC_MINOR__ >= 6
-        ".arch_extension sec\n"
-#endif	
-	"stmfd   sp!, {r0-r6, r11}\n"
-        "mov     r11, r0\n"
-        "mov     r2, %0\n"
-	"mov     r3, %1\n"  
-	"mov     r4, %2\n"  
-	"mov     r5, %3\n"  
-	"mov     r6, %4\n"  
-	"mov     r0, %5\n"
-	"smc     #1\n" 
-        "ldmfd   sp!, {r0-r6, r11}" : : "r" (p1), "r" (p2), "r" (p3), "r" (p4), "r" (p5),"r" (tima_cmdid) : "r0","r2","r3","r4","r5","r6","cc");
-}
-
-#define tima_cache_flush(x)						\
-	__asm__ __volatile__(	"mcr     p15, 0, %0, c7, c14, 1\n"	\
-				"dsb\n"					\
-				"isb\n"					\
-                		: : "r" (x))
-#define tima_cache_inval(x)						\
-	__asm__ __volatile__(	"mcr     p15, 0, %0, c7, c6, 1\n"	\
-				"dsb\n"					\
-				"isb\n"					\
-                		: : "r" (x))
-
-#define tima_tlb_inval_is(x)						\
-	__asm__ __volatile__(	"mcr     p15, 0, %0, c8, c3, 0\n"	\
-				"dsb\n"					\
-				"isb\n"					\
-                		: : "r" (x))
-#endif	/* CONFIG_TIMA_RKP */
-static inline void set_cr(unsigned int val)
+static inline void set_cr(unsigned long val)
 {
 	asm volatile("mcr p15, 0, %0, c1, c0, 0	@ set CR"
 	  : : "r" (val) : "cc");
 	isb();
 }
 
-#ifndef CONFIG_SMP
-extern void adjust_cr(unsigned long mask, unsigned long set);
-#endif
+static inline unsigned int get_auxcr(void)
+{
+	unsigned int val;
+	asm("mrc p15, 0, %0, c1, c0, 1	@ get AUXCR" : "=r" (val));
+	return val;
+}
+
+static inline void set_auxcr(unsigned int val)
+{
+	asm volatile("mcr p15, 0, %0, c1, c0, 1	@ set AUXCR"
+	  : : "r" (val));
+	isb();
+}
 
 #define CPACC_FULL(n)		(3 << (n * 2))
 #define CPACC_SVC(n)		(1 << (n * 2))
@@ -189,6 +119,22 @@ static inline void set_copro_access(unsigned int val)
 	isb();
 }
 
-#endif
+#else /* ifdef CONFIG_CPU_CP15 */
+
+/*
+ * cr_alignment is tightly coupled to cp15 (at least in the minds of the
+ * developers). Yielding 0 for machines without a cp15 (and making it
+ * read-only) is fine for most cases and saves quite some #ifdeffery.
+ */
+#define cr_alignment	UL(0)
+
+static inline unsigned long get_cr(void)
+{
+	return 0;
+}
+
+#endif /* ifdef CONFIG_CPU_CP15 / else */
+
+#endif /* ifndef __ASSEMBLY__ */
 
 #endif

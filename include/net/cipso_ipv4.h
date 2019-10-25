@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * CIPSO - Commercial IP Security Option
  *
@@ -9,26 +10,10 @@
  * de-facto standard for labeled networking.
  *
  * Author: Paul Moore <paul@paul-moore.com>
- *
  */
 
 /*
  * (c) Copyright Hewlett-Packard Development Company, L.P., 2006
- *
- * This program is free software;  you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY;  without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
- * the GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program;  if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- *
  */
 
 #ifndef _CIPSO_IPV4_H
@@ -42,6 +27,7 @@
 #include <net/netlabel.h>
 #include <net/request_sock.h>
 #include <linux/atomic.h>
+#include <linux/refcount.h>
 #include <asm/unaligned.h>
 
 /* known doi values */
@@ -86,7 +72,7 @@ struct cipso_v4_doi {
 	} map;
 	u8 tags[CIPSO_V4_TAG_MAXCNT];
 
-	atomic_t refcount;
+	refcount_t refcount;
 	struct list_head list;
 	struct rcu_head rcu;
 };
@@ -120,13 +106,6 @@ extern int cipso_v4_cache_bucketsize;
 extern int cipso_v4_rbm_optfmt;
 extern int cipso_v4_rbm_strictvalid;
 #endif
-
-/*
- * Helper Functions
- */
-
-#define CIPSO_V4_OPTEXIST(x) (IPCB(x)->opt.cipso != 0)
-#define CIPSO_V4_OPTPTR(x) (skb_network_header(x) + IPCB(x)->opt.cipso)
 
 /*
  * DOI List Functions
@@ -191,7 +170,7 @@ static inline int cipso_v4_doi_domhsh_remove(struct cipso_v4_doi *doi_def,
 
 #ifdef CONFIG_NETLABEL
 void cipso_v4_cache_invalidate(void);
-int cipso_v4_cache_add(const struct sk_buff *skb,
+int cipso_v4_cache_add(const unsigned char *cipso_ptr,
 		       const struct netlbl_lsm_secattr *secattr);
 #else
 static inline void cipso_v4_cache_invalidate(void)
@@ -199,7 +178,7 @@ static inline void cipso_v4_cache_invalidate(void)
 	return;
 }
 
-static inline int cipso_v4_cache_add(const struct sk_buff *skb,
+static inline int cipso_v4_cache_add(const unsigned char *cipso_ptr,
 				     const struct netlbl_lsm_secattr *secattr)
 {
 	return 0;
@@ -212,6 +191,8 @@ static inline int cipso_v4_cache_add(const struct sk_buff *skb,
 
 #ifdef CONFIG_NETLABEL
 void cipso_v4_error(struct sk_buff *skb, int error, u32 gateway);
+int cipso_v4_getattr(const unsigned char *cipso,
+		     struct netlbl_lsm_secattr *secattr);
 int cipso_v4_sock_setattr(struct sock *sk,
 			  const struct cipso_v4_doi *doi_def,
 			  const struct netlbl_lsm_secattr *secattr);
@@ -227,6 +208,7 @@ int cipso_v4_skbuff_setattr(struct sk_buff *skb,
 int cipso_v4_skbuff_delattr(struct sk_buff *skb);
 int cipso_v4_skbuff_getattr(const struct sk_buff *skb,
 			    struct netlbl_lsm_secattr *secattr);
+unsigned char *cipso_v4_optptr(const struct sk_buff *skb);
 int cipso_v4_validate(const struct sk_buff *skb, unsigned char **option);
 #else
 static inline void cipso_v4_error(struct sk_buff *skb,
@@ -234,6 +216,12 @@ static inline void cipso_v4_error(struct sk_buff *skb,
 				  u32 gateway)
 {
 	return;
+}
+
+static inline int cipso_v4_getattr(const unsigned char *cipso,
+				   struct netlbl_lsm_secattr *secattr)
+{
+	return -ENOSYS;
 }
 
 static inline int cipso_v4_sock_setattr(struct sock *sk,
@@ -283,6 +271,11 @@ static inline int cipso_v4_skbuff_getattr(const struct sk_buff *skb,
 	return -ENOSYS;
 }
 
+static inline unsigned char *cipso_v4_optptr(const struct sk_buff *skb)
+{
+	return NULL;
+}
+
 static inline int cipso_v4_validate(const struct sk_buff *skb,
 				    unsigned char **option)
 {
@@ -303,8 +296,12 @@ static inline int cipso_v4_validate(const struct sk_buff *skb,
 	}
 
 	for (opt_iter = 6; opt_iter < opt_len;) {
+		if (opt_iter + 1 == opt_len) {
+			err_offset = opt_iter;
+			goto out;
+		}
 		tag_len = opt[opt_iter + 1];
-		if ((tag_len == 0) || (opt[opt_iter + 1] > (opt_len - opt_iter))) {
+		if ((tag_len == 0) || (tag_len > (opt_len - opt_iter))) {
 			err_offset = opt_iter + 1;
 			goto out;
 		}

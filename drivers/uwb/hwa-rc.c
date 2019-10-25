@@ -1,24 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * WUSB Host Wire Adapter: Radio Control Interface (WUSB[8.6])
  * Radio Control command/event transport
  *
  * Copyright (C) 2005-2006 Intel Corporation
  * Inaky Perez-Gonzalez <inaky.perez-gonzalez@intel.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
- * 02110-1301, USA.
- *
  *
  * Initialize the Radio Control interface Driver.
  *
@@ -47,9 +33,6 @@
  * Affected commands:
  *    UWB_RC_CMD_SCAN
  *    UWB_RC_CMD_SET_DRP_IE
- *
- *
- *
  */
 #include <linux/init.h>
 #include <linux/module.h>
@@ -611,7 +594,16 @@ static
 int hwarc_reset(struct uwb_rc *uwb_rc)
 {
 	struct hwarc *hwarc = uwb_rc->priv;
-	return usb_reset_device(hwarc->usb_dev);
+	int result;
+
+	/* device lock must be held when calling usb_reset_device. */
+	result = usb_lock_device_for_reset(hwarc->usb_dev, NULL);
+	if (result >= 0) {
+		result = usb_reset_device(hwarc->usb_dev);
+		usb_unlock_device(hwarc->usb_dev);
+	}
+
+	return result;
 }
 
 /**
@@ -692,10 +684,8 @@ static int hwarc_neep_init(struct uwb_rc *rc)
 		goto error_rd_buffer;
 	}
 	hwarc->neep_urb = usb_alloc_urb(0, GFP_KERNEL);
-	if (hwarc->neep_urb == NULL) {
-		dev_err(dev, "Unable to allocate notification URB\n");
+	if (hwarc->neep_urb == NULL)
 		goto error_urb_alloc;
-	}
 	usb_fill_int_urb(hwarc->neep_urb, usb_dev,
 			 usb_rcvintpipe(usb_dev, epd->bEndpointAddress),
 			 hwarc->rd_buffer, PAGE_SIZE,
@@ -709,8 +699,10 @@ static int hwarc_neep_init(struct uwb_rc *rc)
 
 error_neep_submit:
 	usb_free_urb(hwarc->neep_urb);
+	hwarc->neep_urb = NULL;
 error_urb_alloc:
 	free_page((unsigned long)hwarc->rd_buffer);
+	hwarc->rd_buffer = NULL;
 error_rd_buffer:
 	return -ENOMEM;
 }
@@ -723,7 +715,10 @@ static void hwarc_neep_release(struct uwb_rc *rc)
 
 	usb_kill_urb(hwarc->neep_urb);
 	usb_free_urb(hwarc->neep_urb);
+	hwarc->neep_urb = NULL;
+
 	free_page((unsigned long)hwarc->rd_buffer);
+	hwarc->rd_buffer = NULL;
 }
 
 /**
@@ -811,6 +806,11 @@ static int hwarc_probe(struct usb_interface *iface,
 	struct hwarc *hwarc;
 	struct device *dev = &iface->dev;
 
+	if (iface->cur_altsetting->desc.bNumEndpoints < 1)
+		return -ENODEV;
+	if (!usb_endpoint_xfer_int(&iface->cur_altsetting->endpoint[0].desc))
+		return -ENODEV;
+
 	result = -ENOMEM;
 	uwb_rc = uwb_rc_alloc();
 	if (uwb_rc == NULL) {
@@ -856,6 +856,7 @@ error_get_version:
 error_rc_add:
 	usb_put_intf(iface);
 	usb_put_dev(hwarc->usb_dev);
+	kfree(hwarc);
 error_alloc:
 	uwb_rc_put(uwb_rc);
 error_rc_alloc:
@@ -899,6 +900,12 @@ static const struct usb_device_id hwarc_id_table[] = {
 	  .driver_info = WUSB_QUIRK_WHCI_CMD_EVT },
 	/* Intel i1480 (using firmware 1.3PA2-20070828) */
 	{ USB_DEVICE_AND_INTERFACE_INFO(0x8086, 0x0c3b, 0xe0, 0x01, 0x02),
+	  .driver_info = WUSB_QUIRK_WHCI_CMD_EVT },
+	/* Alereon 5310 */
+	{ USB_DEVICE_AND_INTERFACE_INFO(0x13dc, 0x5310, 0xe0, 0x01, 0x02),
+	  .driver_info = WUSB_QUIRK_WHCI_CMD_EVT },
+	/* Alereon 5611 */
+	{ USB_DEVICE_AND_INTERFACE_INFO(0x13dc, 0x5611, 0xe0, 0x01, 0x02),
 	  .driver_info = WUSB_QUIRK_WHCI_CMD_EVT },
 	/* Generic match for the Radio Control interface */
 	{ USB_INTERFACE_INFO(0xe0, 0x01, 0x02), },

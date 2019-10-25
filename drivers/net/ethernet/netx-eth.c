@@ -1,20 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * drivers/net/ethernet/netx-eth.c
  *
  * Copyright (c) 2005 Sascha Hauer <s.hauer@pengutronix.de>, Pengutronix
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/init.h>
@@ -34,7 +22,7 @@
 #include <mach/netx-regs.h>
 #include <mach/pfifo.h>
 #include <mach/xc.h>
-#include <mach/eth.h>
+#include <linux/platform_data/eth-netx.h>
 
 /* XC Fifo Offsets */
 #define EMPTY_PTR_FIFO(xcno)    (0 + ((xcno) << 3))	/* Index of the empty pointer FIFO */
@@ -152,8 +140,6 @@ static void netx_eth_receive(struct net_device *ndev)
 
 	skb = netdev_alloc_skb(ndev, len);
 	if (unlikely(skb == NULL)) {
-		printk(KERN_NOTICE "%s: Low memory, packet dropped.\n",
-			ndev->name);
 		ndev->stats.rx_dropped++;
 		return;
 	}
@@ -307,7 +293,6 @@ static const struct net_device_ops netx_eth_netdev_ops = {
 	.ndo_start_xmit		= netx_eth_hard_start_xmit,
 	.ndo_tx_timeout		= netx_eth_timeout,
 	.ndo_set_rx_mode	= netx_eth_set_multicast_list,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_set_mac_address	= eth_mac_addr,
 };
@@ -316,9 +301,8 @@ static int netx_eth_enable(struct net_device *ndev)
 {
 	struct netx_eth_priv *priv = netdev_priv(ndev);
 	unsigned int mac4321, mac65;
-	int running, i;
-
-	ether_setup(ndev);
+	int running, i, ret;
+	bool inv_mac_addr = false;
 
 	ndev->netdev_ops = &netx_eth_netdev_ops;
 	ndev->watchdog_timeo = msecs_to_jiffies(5000);
@@ -363,15 +347,18 @@ static int netx_eth_enable(struct net_device *ndev)
 	xc_start(priv->xc);
 
 	if (!is_valid_ether_addr(ndev->dev_addr))
-		printk("%s: Invalid ethernet MAC address.  Please "
-		       "set using ifconfig\n", ndev->name);
+		inv_mac_addr = true;
 
 	for (i=2; i<=18; i++)
 		pfifo_push(EMPTY_PTR_FIFO(priv->id),
 			FIFO_PTR_FRAMENO(i) | FIFO_PTR_SEGMENT(priv->id));
 
-	return register_netdev(ndev);
+	ret = register_netdev(ndev);
+	if (inv_mac_addr)
+		printk("%s: Invalid ethernet MAC address. Please set using ip\n",
+		       ndev->name);
 
+	return ret;
 }
 
 static int netx_eth_drv_probe(struct platform_device *pdev)
@@ -392,7 +379,7 @@ static int netx_eth_drv_probe(struct platform_device *pdev)
 
 	priv = netdev_priv(ndev);
 
-	pdata = (struct netxeth_platform_data *)pdev->dev.platform_data;
+	pdata = dev_get_platdata(&pdev->dev);
 	priv->xc = request_xc(pdata->xcno, &pdev->dev);
 	if (!priv->xc) {
 		dev_err(&pdev->dev, "unable to request xc engine\n");
@@ -424,7 +411,6 @@ exit_free_pfifo:
 exit_free_xc:
 	free_xc(priv->xc);
 exit_free_netdev:
-	platform_set_drvdata(pdev, NULL);
 	free_netdev(ndev);
 exit:
 	return ret;
@@ -432,10 +418,8 @@ exit:
 
 static int netx_eth_drv_remove(struct platform_device *pdev)
 {
-	struct net_device *ndev = dev_get_drvdata(&pdev->dev);
+	struct net_device *ndev = platform_get_drvdata(pdev);
 	struct netx_eth_priv *priv = netdev_priv(ndev);
-
-	platform_set_drvdata(pdev, NULL);
 
 	unregister_netdev(ndev);
 	xc_stop(priv->xc);
@@ -465,7 +449,6 @@ static struct platform_driver netx_eth_driver = {
 	.resume		= netx_eth_drv_resume,
 	.driver		= {
 		.name	= CARDNAME,
-		.owner	= THIS_MODULE,
 	},
 };
 

@@ -64,9 +64,6 @@ EINVAL
 	detected before any I/O operation was started.  Use a more
 	specific fault code when you can.
 
-	One example would be a driver trying an SMBus Block Write
-	with block size outside the range of 1-32 bytes.
-
 EIO
 	This rather vague error means something went wrong when
 	performing an I/O operation.  Use a more specific fault
@@ -114,6 +111,10 @@ EPROTO
 	or SMBus (or chip-specific) protocol specifications.  One
 	case is when the length of an SMBus block data response
 	(from the SMBus slave) is outside the range 1-32 bytes.
+
+ESHUTDOWN
+	Returned when a transfer was requested using an adapter
+	which is already suspended.
 
 ETIMEDOUT
 	This is returned by drivers when an operation took too much

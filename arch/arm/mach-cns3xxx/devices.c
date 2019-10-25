@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * CNS3xxx common devices
  *
@@ -5,10 +6,6 @@
  *		  Scott Shu
  * Copyright 2010 MontaVista Software, LLC.
  *		  Anton Vorontsov <avorontsov@mvista.com>
- *
- * This file is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, Version 2, as
- * published by the Free Software Foundation.
  */
 
 #include <linux/io.h>
@@ -16,9 +13,8 @@
 #include <linux/compiler.h>
 #include <linux/dma-mapping.h>
 #include <linux/platform_device.h>
-#include <mach/cns3xxx.h>
-#include <mach/irqs.h>
-#include <mach/pm.h>
+#include "cns3xxx.h"
+#include "pm.h"
 #include "core.h"
 #include "devices.h"
 

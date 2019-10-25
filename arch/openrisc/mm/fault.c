@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * OpenRISC fault.c
  *
@@ -8,19 +9,14 @@
  * Modifications for the OpenRISC architecture:
  * Copyright (C) 2003 Matjaz Breskvar <phoenix@bsemi.com>
  * Copyright (C) 2010-2011 Jonas Bonn <jonas@southpole.se>
- *
- *      This program is free software; you can redistribute it and/or
- *      modify it under the terms of the GNU General Public License
- *      as published by the Free Software Foundation; either version
- *      2 of the License, or (at your option) any later version.
  */
 
 #include <linux/mm.h>
 #include <linux/interrupt.h>
-#include <linux/module.h>
-#include <linux/sched.h>
+#include <linux/extable.h>
+#include <linux/sched/signal.h>
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/siginfo.h>
 #include <asm/signal.h>
 
@@ -33,7 +29,7 @@ unsigned long pte_errors;	/* updated by do_page_fault() */
 /* __PHX__ :: - check the vmalloc_fault in do_page_fault()
  *            - also look into include/asm-or32/mmu_context.h
  */
-volatile pgd_t *current_pgd;
+volatile pgd_t *current_pgd[NR_CPUS];
 
 extern void die(char *, struct pt_regs *, long);
 
@@ -52,8 +48,9 @@ asmlinkage void do_page_fault(struct pt_regs *regs, unsigned long address,
 	struct task_struct *tsk;
 	struct mm_struct *mm;
 	struct vm_area_struct *vma;
-	siginfo_t info;
-	int fault;
+	int si_code;
+	vm_fault_t fault;
+	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 
 	tsk = current;
 
@@ -85,6 +82,7 @@ asmlinkage void do_page_fault(struct pt_regs *regs, unsigned long address,
 	if (user_mode(regs)) {
 		/* Exception was in userspace: reenable interrupts */
 		local_irq_enable();
+		flags |= FAULT_FLAG_USER;
 	} else {
 		/* If exception was in a syscall, then IRQ's may have
 		 * been enabled or disabled.  If they were enabled,
@@ -95,7 +93,7 @@ asmlinkage void do_page_fault(struct pt_regs *regs, unsigned long address,
 	}
 
 	mm = tsk->mm;
-	info.si_code = SEGV_MAPERR;
+	si_code = SEGV_MAPERR;
 
 	/*
 	 * If we're in an interrupt or have no user
@@ -105,6 +103,7 @@ asmlinkage void do_page_fault(struct pt_regs *regs, unsigned long address,
 	if (in_interrupt() || !mm)
 		goto no_context;
 
+retry:
 	down_read(&mm->mmap_sem);
 	vma = find_vma(mm, address);
 
@@ -136,13 +135,14 @@ asmlinkage void do_page_fault(struct pt_regs *regs, unsigned long address,
 	 */
 
 good_area:
-	info.si_code = SEGV_ACCERR;
+	si_code = SEGV_ACCERR;
 
 	/* first do some preliminary protection checks */
 
 	if (write_acc) {
 		if (!(vma->vm_flags & VM_WRITE))
 			goto bad_area;
+		flags |= FAULT_FLAG_WRITE;
 	} else {
 		/* not present */
 		if (!(vma->vm_flags & (VM_READ | VM_EXEC)))
@@ -159,7 +159,11 @@ good_area:
 	 * the fault.
 	 */
 
-	fault = handle_mm_fault(mm, vma, address, write_acc);
+	fault = handle_mm_fault(vma, address, flags);
+
+	if ((fault & VM_FAULT_RETRY) && fatal_signal_pending(current))
+		return;
+
 	if (unlikely(fault & VM_FAULT_ERROR)) {
 		if (fault & VM_FAULT_OOM)
 			goto out_of_memory;
@@ -169,11 +173,25 @@ good_area:
 			goto do_sigbus;
 		BUG();
 	}
-	/*RGD modeled on Cris */
-	if (fault & VM_FAULT_MAJOR)
-		tsk->maj_flt++;
-	else
-		tsk->min_flt++;
+
+	if (flags & FAULT_FLAG_ALLOW_RETRY) {
+		/*RGD modeled on Cris */
+		if (fault & VM_FAULT_MAJOR)
+			tsk->maj_flt++;
+		else
+			tsk->min_flt++;
+		if (fault & VM_FAULT_RETRY) {
+			flags &= ~FAULT_FLAG_ALLOW_RETRY;
+			flags |= FAULT_FLAG_TRIED;
+
+			 /* No need to up_read(&mm->mmap_sem) as we would
+			 * have already released it in __lock_page_or_retry
+			 * in mm/filemap.c.
+			 */
+
+			goto retry;
+		}
+	}
 
 	up_read(&mm->mmap_sem);
 	return;
@@ -191,11 +209,7 @@ bad_area_nosemaphore:
 	/* User mode accesses just cause a SIGSEGV */
 
 	if (user_mode(regs)) {
-		info.si_signo = SIGSEGV;
-		info.si_errno = 0;
-		/* info.si_code has been set above */
-		info.si_addr = (void *)address;
-		force_sig_info(SIGSEGV, &info, tsk);
+		force_sig_fault(SIGSEGV, si_code, (void __user *)address, tsk);
 		return;
 	}
 
@@ -248,10 +262,10 @@ out_of_memory:
 	__asm__ __volatile__("l.nop 1");
 
 	up_read(&mm->mmap_sem);
-	printk("VM: killing process %s\n", tsk->comm);
-	if (user_mode(regs))
-		do_exit(SIGKILL);
-	goto no_context;
+	if (!user_mode(regs))
+		goto no_context;
+	pagefault_out_of_memory();
+	return;
 
 do_sigbus:
 	up_read(&mm->mmap_sem);
@@ -260,11 +274,7 @@ do_sigbus:
 	 * Send a sigbus, regardless of whether we were in kernel
 	 * or user mode.
 	 */
-	info.si_signo = SIGBUS;
-	info.si_errno = 0;
-	info.si_code = BUS_ADRERR;
-	info.si_addr = (void *)address;
-	force_sig_info(SIGBUS, &info, tsk);
+	force_sig_fault(SIGBUS, BUS_ADRERR, (void __user *)address, tsk);
 
 	/* Kernel mode? Handle exceptions or die */
 	if (!user_mode(regs))
@@ -297,7 +307,7 @@ vmalloc_fault:
 
 		phx_mmu("vmalloc_fault");
 */
-		pgd = (pgd_t *)current_pgd + offset;
+		pgd = (pgd_t *)current_pgd[smp_processor_id()] + offset;
 		pgd_k = init_mm.pgd + offset;
 
 		/* Since we're two-level, we don't need to do both

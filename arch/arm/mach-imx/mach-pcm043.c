@@ -1,15 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (C) 2009 Sascha Hauer, Pengutronix
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/types.h>
@@ -20,11 +11,12 @@
 #include <linux/mtd/plat-ram.h>
 #include <linux/memory.h>
 #include <linux/gpio.h>
+#include <linux/gpio/machine.h>
 #include <linux/smc911x.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
 #include <linux/i2c.h>
-#include <linux/i2c/at24.h>
+#include <linux/property.h>
 #include <linux/usb/otg.h>
 #include <linux/usb/ulpi.h>
 
@@ -33,12 +25,12 @@
 #include <asm/mach/time.h>
 #include <asm/mach/map.h>
 
-#include <mach/hardware.h>
-#include <mach/common.h>
-#include <mach/iomux-mx35.h>
-#include <mach/ulpi.h>
-
+#include "common.h"
 #include "devices-imx35.h"
+#include "ehci.h"
+#include "hardware.h"
+#include "iomux-mx35.h"
+#include "ulpi.h"
 
 static const struct fb_videomode fb_modedb[] = {
 	{
@@ -76,10 +68,6 @@ static const struct fb_videomode fb_modedb[] = {
 	},
 };
 
-static const struct ipu_platform_data mx3_ipu_data __initconst = {
-	.irq_base = MXC_IPU_IRQ_START,
-};
-
 static struct mx3fb_platform_data mx3fb_pdata __initdata = {
 	.name		= "Sharp-LQ035Q7",
 	.mode		= fb_modedb,
@@ -114,16 +102,15 @@ static const struct imxi2c_platform_data pcm043_i2c0_data __initconst = {
 	.bitrate = 50000,
 };
 
-static struct at24_platform_data board_eeprom = {
-	.byte_len = 4096,
-	.page_size = 32,
-	.flags = AT24_FLAG_ADDR16,
+static const struct property_entry board_eeprom_properties[] = {
+	PROPERTY_ENTRY_U32("pagesize", 32),
+	{ }
 };
 
 static struct i2c_board_info pcm043_i2c_devices[] = {
 	{
-		I2C_BOARD_INFO("at24", 0x52), /* E0=0, E1=1, E2=0 */
-		.platform_data = &board_eeprom,
+		I2C_BOARD_INFO("24c32", 0x52), /* E0=0, E1=1, E2=0 */
+		.properties = board_eeprom_properties,
 	}, {
 		I2C_BOARD_INFO("pcf8563", 0x51),
 	},
@@ -133,7 +120,7 @@ static struct platform_device *devices[] __initdata = {
 	&pcm043_flash,
 };
 
-static iomux_v3_cfg_t pcm043_pads[] = {
+static const iomux_v3_cfg_t pcm043_pads[] __initconst = {
 	/* UART1 */
 	MX35_PAD_CTS1__UART1_CTS,
 	MX35_PAD_RTS1__UART1_RTS,
@@ -219,8 +206,6 @@ static iomux_v3_cfg_t pcm043_pads[] = {
 #define AC97_GPIO_TXFS	IMX_GPIO_NR(2, 31)
 #define AC97_GPIO_TXD	IMX_GPIO_NR(2, 28)
 #define AC97_GPIO_RESET	IMX_GPIO_NR(2, 0)
-#define SD1_GPIO_WP	IMX_GPIO_NR(2, 23)
-#define SD1_GPIO_CD	IMX_GPIO_NR(2, 24)
 
 static void pcm043_ac97_warm_reset(struct snd_ac97 *ac97)
 {
@@ -330,26 +315,35 @@ static const struct fsl_usb2_platform_data otg_device_pdata __initconst = {
 	.phy_mode       = FSL_USB2_PHY_UTMI,
 };
 
-static int otg_mode_host;
+static bool otg_mode_host __initdata;
 
 static int __init pcm043_otg_mode(char *options)
 {
 	if (!strcmp(options, "host"))
-		otg_mode_host = 1;
+		otg_mode_host = true;
 	else if (!strcmp(options, "device"))
-		otg_mode_host = 0;
+		otg_mode_host = false;
 	else
 		pr_info("otg_mode neither \"host\" nor \"device\". "
 			"Defaulting to device\n");
-	return 0;
+	return 1;
 }
 __setup("otg_mode=", pcm043_otg_mode);
 
 static struct esdhc_platform_data sd1_pdata = {
-	.wp_gpio = SD1_GPIO_WP,
-	.cd_gpio = SD1_GPIO_CD,
 	.wp_type = ESDHC_WP_GPIO,
 	.cd_type = ESDHC_CD_GPIO,
+};
+
+static struct gpiod_lookup_table sd1_gpio_table = {
+	.dev_id = "sdhci-esdhc-imx35.0",
+	.table = {
+		/* Card detect: bank 2 offset 24 */
+		GPIO_LOOKUP("imx35-gpio.2", 24, "cd", GPIO_ACTIVE_LOW),
+		/* Write protect: bank 2 offset 23 */
+		GPIO_LOOKUP("imx35-gpio.2", 23, "wp", GPIO_ACTIVE_LOW),
+		{ },
+	},
 };
 
 /*
@@ -363,11 +357,10 @@ static void __init pcm043_init(void)
 
 	imx35_add_fec(NULL);
 	platform_add_devices(devices, ARRAY_SIZE(devices));
-	imx35_add_imx2_wdt(NULL);
+	imx35_add_imx2_wdt();
 
 	imx35_add_imx_uart0(&uart_pdata);
 	imx35_add_mxc_nand(&pcm037_nand_board_info);
-	imx35_add_imx_ssi(0, &pcm043_ssi_pdata);
 
 	imx35_add_imx_uart1(&uart_pdata);
 
@@ -376,7 +369,7 @@ static void __init pcm043_init(void)
 
 	imx35_add_imx_i2c0(&pcm043_i2c0_data);
 
-	imx35_add_ipu_core(&mx3_ipu_data);
+	imx35_add_ipu_core();
 	imx35_add_mx3_sdc_fb(&mx3fb_pdata);
 
 	if (otg_mode_host) {
@@ -390,7 +383,14 @@ static void __init pcm043_init(void)
 	if (!otg_mode_host)
 		imx35_add_fsl_usb2_udc(&otg_device_pdata);
 
-	imx35_add_flexcan1(NULL);
+	imx35_add_flexcan1();
+}
+
+static void __init pcm043_late_init(void)
+{
+	imx35_add_imx_ssi(0, &pcm043_ssi_pdata);
+
+	gpiod_add_lookup_table(&sd1_gpio_table);
 	imx35_add_sdhci_esdhc_imx(0, &sd1_pdata);
 }
 
@@ -399,18 +399,14 @@ static void __init pcm043_timer_init(void)
 	mx35_clocks_init();
 }
 
-struct sys_timer pcm043_timer = {
-	.init	= pcm043_timer_init,
-};
-
 MACHINE_START(PCM043, "Phytec Phycore pcm043")
 	/* Maintainer: Pengutronix */
 	.atag_offset = 0x100,
 	.map_io = mx35_map_io,
 	.init_early = imx35_init_early,
 	.init_irq = mx35_init_irq,
-	.handle_irq = imx35_handle_irq,
-	.timer = &pcm043_timer,
-	.init_machine = pcm043_init,
+	.init_time = pcm043_timer_init,
+	.init_machine	= pcm043_init,
+	.init_late	= pcm043_late_init,
 	.restart	= mxc_restart,
 MACHINE_END

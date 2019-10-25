@@ -1,16 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, version 2, as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
  * Copyright IBM Corp. 2008
  *
@@ -63,9 +52,6 @@ static inline void kvmppc_account_exit_stat(struct kvm_vcpu *vcpu, int type)
 	case EMULATED_INST_EXITS:
 		vcpu->stat.emulated_inst_exits++;
 		break;
-	case DCR_EXITS:
-		vcpu->stat.dcr_exits++;
-		break;
 	case DSI_EXITS:
 		vcpu->stat.dsi_exits++;
 		break;
@@ -92,6 +78,12 @@ static inline void kvmppc_account_exit_stat(struct kvm_vcpu *vcpu, int type)
 		break;
 	case SIGNAL_EXITS:
 		vcpu->stat.signal_exits++;
+		break;
+	case DBELL_EXITS:
+		vcpu->stat.dbell_exits++;
+		break;
+	case GDBELL_EXITS:
+		vcpu->stat.gdbell_exits++;
 		break;
 	}
 }

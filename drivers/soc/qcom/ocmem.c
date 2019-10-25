@@ -190,13 +190,13 @@ struct ocmem *of_get_ocmem(struct device *dev)
 	struct platform_device *pdev;
 	struct device_node *devnode;
 
-	devnode = of_parse_phandle(dev->of_node, "sram", 0);
-	if (!devnode || !devnode->parent) {
-		dev_err(dev, "Cannot look up sram phandle\n");
+	devnode = of_parse_phandle(dev->of_node, "ocmem", 0);
+	if (!devnode) {
+		dev_err(dev, "Cannot look up ocmem phandle\n");
 		return ERR_PTR(-ENODEV);
 	}
 
-	pdev = of_find_device_by_node(devnode->parent);
+	pdev = of_find_device_by_node(devnode);
 	if (!pdev) {
 		dev_err(dev, "Cannot find device node %s\n", devnode->name);
 		return ERR_PTR(-EPROBE_DEFER);
@@ -430,4 +430,4 @@ static struct platform_driver ocmem_driver = {
 module_platform_driver(ocmem_driver);
 
 MODULE_DESCRIPTION("On Chip Memory (OCMEM) allocator for some Snapdragon SoCs");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");

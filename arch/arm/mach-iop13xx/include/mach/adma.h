@@ -1,19 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright(c) 2006, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- *
  */
 #ifndef _ADMA_H
 #define _ADMA_H
@@ -218,20 +205,6 @@ iop_chan_xor_slot_count(size_t len, int src_cnt, int *slots_per_op)
 #define iop_chan_pq_slot_count iop_chan_xor_slot_count
 #define iop_chan_pq_zero_sum_slot_count iop_chan_xor_slot_count
 
-static inline u32 iop_desc_get_dest_addr(struct iop_adma_desc_slot *desc,
-					struct iop_adma_chan *chan)
-{
-	struct iop13xx_adma_desc_hw *hw_desc = desc->hw_desc;
-	return hw_desc->dest_addr;
-}
-
-static inline u32 iop_desc_get_qdest_addr(struct iop_adma_desc_slot *desc,
-					  struct iop_adma_chan *chan)
-{
-	struct iop13xx_adma_desc_hw *hw_desc = desc->hw_desc;
-	return hw_desc->q_dest_addr;
-}
-
 static inline u32 iop_desc_get_byte_count(struct iop_adma_desc_slot *desc,
 					struct iop_adma_chan *chan)
 {
@@ -348,18 +321,6 @@ iop_desc_init_pq(struct iop_adma_desc_slot *desc, int src_cnt,
 	u_desc_ctrl.field.p_xfer_dis = !!(flags & DMA_PREP_PQ_DISABLE_P);
 	u_desc_ctrl.field.int_en = flags & DMA_PREP_INTERRUPT;
 	hw_desc->desc_ctrl = u_desc_ctrl.value;
-}
-
-static inline int iop_desc_is_pq(struct iop_adma_desc_slot *desc)
-{
-	struct iop13xx_adma_desc_hw *hw_desc = desc->hw_desc;
-	union {
-		u32 value;
-		struct iop13xx_adma_desc_ctrl field;
-	} u_desc_ctrl;
-
-	u_desc_ctrl.value = hw_desc->desc_ctrl;
-	return u_desc_ctrl.field.pq_xfer_en;
 }
 
 static inline void

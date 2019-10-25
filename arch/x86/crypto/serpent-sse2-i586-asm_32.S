@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Serpent Cipher 4-way parallel algorithm (i586/SSE2)
  *
@@ -6,23 +7,9 @@
  * Based on crypto/serpent.c by
  *  Copyright (C) 2002 Dag Arne Osvik <osvik@ii.uib.no>
  *                2003 Herbert Valerio Riedel <hvr@gnu.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307
- * USA
- *
  */
+
+#include <linux/linkage.h>
 
 .file "serpent-sse2-i586-asm_32.S"
 .text
@@ -510,11 +497,7 @@
 	pxor t0,		x3; \
 	movdqu x3,		(3*4*4)(out);
 
-.align 8
-.global __serpent_enc_blk_4way
-.type   __serpent_enc_blk_4way,@function;
-
-__serpent_enc_blk_4way:
+ENTRY(__serpent_enc_blk_4way)
 	/* input:
 	 *	arg_ctx(%esp): ctx, CTX
 	 *	arg_dst(%esp): dst
@@ -566,22 +549,19 @@ __serpent_enc_blk_4way:
 	movl arg_dst(%esp), %eax;
 
 	cmpb $0, arg_xor(%esp);
-	jnz __enc_xor4;
+	jnz .L__enc_xor4;
 
 	write_blocks(%eax, RA, RB, RC, RD, RT0, RT1, RE);
 
 	ret;
 
-__enc_xor4:
+.L__enc_xor4:
 	xor_blocks(%eax, RA, RB, RC, RD, RT0, RT1, RE);
 
 	ret;
+ENDPROC(__serpent_enc_blk_4way)
 
-.align 8
-.global serpent_dec_blk_4way
-.type   serpent_dec_blk_4way,@function;
-
-serpent_dec_blk_4way:
+ENTRY(serpent_dec_blk_4way)
 	/* input:
 	 *	arg_ctx(%esp): ctx, CTX
 	 *	arg_dst(%esp): dst
@@ -633,3 +613,4 @@ serpent_dec_blk_4way:
 	write_blocks(%eax, RC, RD, RB, RE, RT0, RT1, RA);
 
 	ret;
+ENDPROC(serpent_dec_blk_4way)

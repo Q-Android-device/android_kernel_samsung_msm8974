@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* qlogicpti.c: Performance Technologies QlogicISP sbus card driver.
  *
  * Copyright (C) 1996, 2006, 2008 David S. Miller (davem@davemloft.net)
@@ -461,7 +462,7 @@ static int qlogicpti_reset_hardware(struct Scsi_Host *host)
 
 #define PTI_RESET_LIMIT 400
 
-static int __devinit qlogicpti_load_firmware(struct qlogicpti *qpti)
+static int qlogicpti_load_firmware(struct qlogicpti *qpti)
 {
 	const struct firmware *fw;
 	const char fwname[] = "qlogic/isp1000.bin";
@@ -670,7 +671,7 @@ static int qlogicpti_verify_tmon(struct qlogicpti *qpti)
 
 static irqreturn_t qpti_intr(int irq, void *dev_id);
 
-static void __devinit qpti_chain_add(struct qlogicpti *qpti)
+static void qpti_chain_add(struct qlogicpti *qpti)
 {
 	spin_lock_irq(&qptichain_lock);
 	if (qptichain != NULL) {
@@ -686,7 +687,7 @@ static void __devinit qpti_chain_add(struct qlogicpti *qpti)
 	spin_unlock_irq(&qptichain_lock);
 }
 
-static void __devexit qpti_chain_del(struct qlogicpti *qpti)
+static void qpti_chain_del(struct qlogicpti *qpti)
 {
 	spin_lock_irq(&qptichain_lock);
 	if (qptichain == qpti) {
@@ -701,7 +702,7 @@ static void __devexit qpti_chain_del(struct qlogicpti *qpti)
 	spin_unlock_irq(&qptichain_lock);
 }
 
-static int __devinit qpti_map_regs(struct qlogicpti *qpti)
+static int qpti_map_regs(struct qlogicpti *qpti)
 {
 	struct platform_device *op = qpti->op;
 
@@ -710,7 +711,7 @@ static int __devinit qpti_map_regs(struct qlogicpti *qpti)
 				 "PTI Qlogic/ISP");
 	if (!qpti->qregs) {
 		printk("PTI: Qlogic/ISP registers are unmappable\n");
-		return -1;
+		return -ENODEV;
 	}
 	if (qpti->is_pti) {
 		qpti->sreg = of_ioremap(&op->resource[0], (16 * 4096),
@@ -718,13 +719,13 @@ static int __devinit qpti_map_regs(struct qlogicpti *qpti)
 					"PTI Qlogic/ISP statreg");
 		if (!qpti->sreg) {
 			printk("PTI: Qlogic/ISP status register is unmappable\n");
-			return -1;
+			return -ENODEV;
 		}
 	}
 	return 0;
 }
 
-static int __devinit qpti_register_irq(struct qlogicpti *qpti)
+static int qpti_register_irq(struct qlogicpti *qpti)
 {
 	struct platform_device *op = qpti->op;
 
@@ -749,7 +750,7 @@ fail:
 	return -1;
 }
 
-static void __devinit qpti_get_scsi_id(struct qlogicpti *qpti)
+static void qpti_get_scsi_id(struct qlogicpti *qpti)
 {
 	struct platform_device *op = qpti->op;
 	struct device_node *dp;
@@ -803,7 +804,7 @@ static void qpti_get_clock(struct qlogicpti *qpti)
 /* The request and response queues must each be aligned
  * on a page boundary.
  */
-static int __devinit qpti_map_queues(struct qlogicpti *qpti)
+static int qpti_map_queues(struct qlogicpti *qpti)
 {
 	struct platform_device *op = qpti->op;
 
@@ -959,7 +960,7 @@ static inline void update_can_queue(struct Scsi_Host *host, u_int in_ptr, u_int 
 	/* Temporary workaround until bug is found and fixed (one bug has been found
 	   already, but fixing it makes things even worse) -jj */
 	int num_free = QLOGICPTI_REQ_QUEUE_LEN - REQ_QUEUE_DEPTH(in_ptr, out_ptr) - 64;
-	host->can_queue = host->host_busy + num_free;
+	host->can_queue = scsi_host_busy(host) + num_free;
 	host->sg_tablesize = QLOGICPTI_MAX_SG(num_free);
 }
 
@@ -1283,29 +1284,20 @@ static struct scsi_host_template qpti_template = {
 	.queuecommand		= qlogicpti_queuecommand,
 	.slave_configure	= qlogicpti_slave_configure,
 	.eh_abort_handler	= qlogicpti_abort,
-	.eh_bus_reset_handler	= qlogicpti_reset,
+	.eh_host_reset_handler	= qlogicpti_reset,
 	.can_queue		= QLOGICPTI_REQ_QUEUE_LEN,
 	.this_id		= 7,
 	.sg_tablesize		= QLOGICPTI_MAX_SG(QLOGICPTI_REQ_QUEUE_LEN),
-	.cmd_per_lun		= 1,
-	.use_clustering		= ENABLE_CLUSTERING,
 };
 
 static const struct of_device_id qpti_match[];
-static int __devinit qpti_sbus_probe(struct platform_device *op)
+static int qpti_sbus_probe(struct platform_device *op)
 {
-	const struct of_device_id *match;
-	struct scsi_host_template *tpnt;
 	struct device_node *dp = op->dev.of_node;
 	struct Scsi_Host *host;
 	struct qlogicpti *qpti;
 	static int nqptis;
 	const char *fcode;
-
-	match = of_match_device(qpti_match, &op->dev);
-	if (!match)
-		return -EINVAL;
-	tpnt = match->data;
 
 	/* Sometimes Antares cards come up not completely
 	 * setup, and we get a report of a zero IRQ.
@@ -1313,7 +1305,7 @@ static int __devinit qpti_sbus_probe(struct platform_device *op)
 	if (op->archdata.irqs[0] == 0)
 		return -ENODEV;
 
-	host = scsi_host_alloc(tpnt, sizeof(struct qlogicpti));
+	host = scsi_host_alloc(&qpti_template, sizeof(struct qlogicpti));
 	if (!host)
 		return -ENOMEM;
 
@@ -1323,8 +1315,7 @@ static int __devinit qpti_sbus_probe(struct platform_device *op)
 	qpti->qhost = host;
 	qpti->op = op;
 	qpti->qpti_id = nqptis;
-	strcpy(qpti->prom_name, op->dev.of_node->name);
-	qpti->is_pti = strcmp(qpti->prom_name, "QLGC,isp");
+	qpti->is_pti = !of_node_name_eq(op->dev.of_node, "QLGC,isp");
 
 	if (qpti_map_regs(qpti) < 0)
 		goto fail_unlink;
@@ -1393,6 +1384,9 @@ fail_unmap_queues:
 			  qpti->req_cpu, qpti->req_dvma);
 #undef QSIZE
 
+fail_free_irq:
+	free_irq(qpti->irq, qpti);
+
 fail_unmap_regs:
 	of_iounmap(&op->resource[0], qpti->qregs,
 		   resource_size(&op->resource[0]));
@@ -1400,16 +1394,13 @@ fail_unmap_regs:
 		of_iounmap(&op->resource[0], qpti->sreg,
 			   sizeof(unsigned char));
 
-fail_free_irq:
-	free_irq(qpti->irq, qpti);
-
 fail_unlink:
 	scsi_host_put(host);
 
 	return -ENODEV;
 }
 
-static int __devexit qpti_sbus_remove(struct platform_device *op)
+static int qpti_sbus_remove(struct platform_device *op)
 {
 	struct qlogicpti *qpti = dev_get_drvdata(&op->dev);
 
@@ -1445,19 +1436,15 @@ static int __devexit qpti_sbus_remove(struct platform_device *op)
 static const struct of_device_id qpti_match[] = {
 	{
 		.name = "ptisp",
-		.data = &qpti_template,
 	},
 	{
 		.name = "PTI,ptisp",
-		.data = &qpti_template,
 	},
 	{
 		.name = "QLGC,isp",
-		.data = &qpti_template,
 	},
 	{
 		.name = "SUNW,isp",
-		.data = &qpti_template,
 	},
 	{},
 };
@@ -1466,11 +1453,10 @@ MODULE_DEVICE_TABLE(of, qpti_match);
 static struct platform_driver qpti_sbus_driver = {
 	.driver = {
 		.name = "qpti",
-		.owner = THIS_MODULE,
 		.of_match_table = qpti_match,
 	},
 	.probe		= qpti_sbus_probe,
-	.remove		= __devexit_p(qpti_sbus_remove),
+	.remove		= qpti_sbus_remove,
 };
 
 static int __init qpti_init(void)

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_FIRMWARE_H
 #define _LINUX_FIRMWARE_H
 
@@ -12,6 +13,9 @@ struct firmware {
 	size_t size;
 	const u8 *data;
 	struct page **pages;
+
+	/* firmware loader private fields */
+	void *priv;
 };
 
 struct module;
@@ -36,29 +40,35 @@ struct builtin_fw {
 	__used __section(.builtin_fw) = { name, blob, size }
 
 #if defined(CONFIG_FW_LOADER) || (defined(CONFIG_FW_LOADER_MODULE) && defined(MODULE))
-int request_firmware_direct(const char *name, struct device *device,
-			    phys_addr_t addr, size_t size);
 int request_firmware(const struct firmware **fw, const char *name,
 		     struct device *device);
+int firmware_request_nowarn(const struct firmware **fw, const char *name,
+			    struct device *device);
 int request_firmware_nowait(
 	struct module *module, bool uevent,
 	const char *name, struct device *device, gfp_t gfp, void *context,
 	void (*cont)(const struct firmware *fw, void *context));
+int request_firmware_direct(const struct firmware **fw, const char *name,
+			    struct device *device);
+int request_firmware_into_buf(const struct firmware **firmware_p,
+	const char *name, struct device *device, void *buf, size_t size);
 
 void release_firmware(const struct firmware *fw);
 #else
-static inline int request_firmware_direct(const char *name,
-					  struct device *device,
-					  phys_addr_t addr, size_t size)
-{
-	return -EINVAL;
-}
 static inline int request_firmware(const struct firmware **fw,
 				   const char *name,
 				   struct device *device)
 {
 	return -EINVAL;
 }
+
+static inline int firmware_request_nowarn(const struct firmware **fw,
+					  const char *name,
+					  struct device *device)
+{
+	return -EINVAL;
+}
+
 static inline int request_firmware_nowait(
 	struct module *module, bool uevent,
 	const char *name, struct device *device, gfp_t gfp, void *context,
@@ -70,6 +80,22 @@ static inline int request_firmware_nowait(
 static inline void release_firmware(const struct firmware *fw)
 {
 }
+
+static inline int request_firmware_direct(const struct firmware **fw,
+					  const char *name,
+					  struct device *device)
+{
+	return -EINVAL;
+}
+
+static inline int request_firmware_into_buf(const struct firmware **firmware_p,
+	const char *name, struct device *device, void *buf, size_t size)
+{
+	return -EINVAL;
+}
+
 #endif
+
+int firmware_request_cache(struct device *device, const char *name);
 
 #endif

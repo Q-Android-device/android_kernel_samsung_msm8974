@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/arch/arm/mach-w90x900/mach-nuc950evb.c
  *
@@ -7,12 +8,8 @@
  *
  * Wan ZongShun <mcuos.com@gmail.com>
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation;version 2 of the License.
  *   history:
  *     Wang Qiang (rurality.linux@gmail.com) add LCD support
- *
  */
 
 #include <linux/platform_device.h>
@@ -20,7 +17,7 @@
 #include <asm/mach/map.h>
 #include <asm/mach-types.h>
 #include <mach/map.h>
-#include <mach/fb.h>
+#include <linux/platform_data/video-nuc900fb.h>
 
 #include "nuc950.h"
 
@@ -40,6 +37,6 @@ MACHINE_START(W90P950EVB, "W90P950EVB")
 	.map_io		= nuc950evb_map_io,
 	.init_irq	= nuc900_init_irq,
 	.init_machine	= nuc950evb_init,
-	.timer		= &nuc900_timer,
+	.init_time	= nuc900_timer_init,
 	.restart	= nuc9xx_restart,
 MACHINE_END

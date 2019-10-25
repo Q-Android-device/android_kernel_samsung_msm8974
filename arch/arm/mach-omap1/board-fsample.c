@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/arch/arm/mach-omap1/board-fsample.c
  *
@@ -5,10 +6,6 @@
  *
  * Original OMAP730 support by Jean Pihet <j-pihet@ti.com>
  * Updated for 2.6 by Kevin Hilman <kjh@hilman.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/gpio.h>
 #include <linux/kernel.h>
@@ -16,8 +13,7 @@
 #include <linux/platform_device.h>
 #include <linux/delay.h>
 #include <linux/mtd/mtd.h>
-#include <linux/mtd/nand.h>
-#include <linux/mtd/partitions.h>
+#include <linux/mtd/platnand.h>
 #include <linux/mtd/physmap.h>
 #include <linux/input.h>
 #include <linux/smc91x.h>
@@ -27,17 +23,16 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 
-#include <plat/tc.h>
-#include <plat/mux.h>
-#include <plat/flash.h>
-#include <plat/fpga.h>
-#include <plat/keypad.h>
-#include <plat/board.h>
+#include <mach/tc.h>
+#include <mach/mux.h>
+#include "flash.h"
+#include <linux/platform_data/keypad-omap.h>
 
 #include <mach/hardware.h>
 
 #include "iomap.h"
 #include "common.h"
+#include "fpga.h"
 
 /* fsample is pretty close to p2-sample */
 
@@ -124,9 +119,9 @@ static struct resource smc91x_resources[] = {
 
 static void __init fsample_init_smc91x(void)
 {
-	fpga_write(1, H2P2_DBG_FPGA_LAN_RESET);
+	__raw_writeb(1, H2P2_DBG_FPGA_LAN_RESET);
 	mdelay(50);
-	fpga_write(fpga_read(H2P2_DBG_FPGA_LAN_RESET) & ~1,
+	__raw_writeb(__raw_readb(H2P2_DBG_FPGA_LAN_RESET) & ~1,
 		   H2P2_DBG_FPGA_LAN_RESET);
 	mdelay(50);
 }
@@ -185,38 +180,21 @@ static struct platform_device nor_device = {
 	.resource	= &nor_resource,
 };
 
-static void nand_cmd_ctl(struct mtd_info *mtd, int cmd,	unsigned int ctrl)
-{
-	struct nand_chip *this = mtd->priv;
-	unsigned long mask;
-
-	if (cmd == NAND_CMD_NONE)
-		return;
-
-	mask = (ctrl & NAND_CLE) ? 0x02 : 0;
-	if (ctrl & NAND_ALE)
-		mask |= 0x04;
-	writeb(cmd, (unsigned long)this->IO_ADDR_W | mask);
-}
-
 #define FSAMPLE_NAND_RB_GPIO_PIN	62
 
-static int nand_dev_ready(struct mtd_info *mtd)
+static int nand_dev_ready(struct nand_chip *chip)
 {
 	return gpio_get_value(FSAMPLE_NAND_RB_GPIO_PIN);
 }
-
-static const char *part_probes[] = { "cmdlinepart", NULL };
 
 static struct platform_nand_data nand_data = {
 	.chip	= {
 		.nr_chips		= 1,
 		.chip_offset		= 0,
 		.options		= NAND_SAMSUNG_LP_OPTIONS,
-		.part_probe_types	= part_probes,
 	},
 	.ctrl	= {
-		.cmd_ctrl	= nand_cmd_ctl,
+		.cmd_ctrl	= omap1_nand_cmd_ctl,
 		.dev_ready	= nand_dev_ready,
 	},
 };
@@ -284,7 +262,7 @@ static struct platform_device *devices[] __initdata = {
 	&kp_device,
 };
 
-static struct omap_lcd_config fsample_lcd_config = {
+static const struct omap_lcd_config fsample_lcd_config = {
 	.ctrl_name	= "internal",
 };
 
@@ -325,8 +303,7 @@ static void __init omap_fsample_init(void)
 
 	fsample_init_smc91x();
 
-	if (gpio_request(FSAMPLE_NAND_RB_GPIO_PIN, "NAND ready") < 0)
-		BUG();
+	BUG_ON(gpio_request(FSAMPLE_NAND_RB_GPIO_PIN, "NAND ready") < 0);
 	gpio_direction_input(FSAMPLE_NAND_RB_GPIO_PIN);
 
 	omap_cfg_reg(L3_1610_FLASH_CS2B_OE);
@@ -380,9 +357,10 @@ MACHINE_START(OMAP_FSAMPLE, "OMAP730 F-Sample")
 	.atag_offset	= 0x100,
 	.map_io		= omap_fsample_map_io,
 	.init_early	= omap1_init_early,
-	.reserve	= omap_reserve,
 	.init_irq	= omap1_init_irq,
+	.handle_irq	= omap1_handle_irq,
 	.init_machine	= omap_fsample_init,
-	.timer		= &omap1_timer,
+	.init_late	= omap1_init_late,
+	.init_time	= omap1_timer_init,
 	.restart	= omap1_restart,
 MACHINE_END

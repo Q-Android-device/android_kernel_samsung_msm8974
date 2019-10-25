@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* 
  *    PDC Console support - ie use firmware to dump text via boot console
  *
@@ -13,21 +14,6 @@
  *    Copyright (C) 2001 Thomas Bogendoerfer <tsbogend at parisc-linux.org>
  *    Copyright (C) 2002 Randolph Chung <tausq with parisc-linux.org>
  *    Copyright (C) 2010 Guy Martin <gmsoft at tuxicoman.be>
- *
- *
- *    This program is free software; you can redistribute it and/or modify
- *    it under the terms of the GNU General Public License as published by
- *    the Free Software Foundation; either version 2 of the License, or
- *    (at your option) any later version.
- *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU General Public License for more details.
- *
- *    You should have received a copy of the GNU General Public License
- *    along with this program; if not, write to the Free Software
- *    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 /*
@@ -91,8 +77,8 @@ static int pdc_console_setup(struct console *co, char *options)
 
 #define PDC_CONS_POLL_DELAY (30 * HZ / 1000)
 
-static void pdc_console_poll(unsigned long unused);
-static DEFINE_TIMER(pdc_console_timer, pdc_console_poll, 0, 0);
+static void pdc_console_poll(struct timer_list *unused);
+static DEFINE_TIMER(pdc_console_timer, pdc_console_poll);
 static struct tty_port tty_port;
 
 static int pdc_console_tty_open(struct tty_struct *tty, struct file *filp)
@@ -135,26 +121,20 @@ static const struct tty_operations pdc_console_tty_ops = {
 	.chars_in_buffer = pdc_console_tty_chars_in_buffer,
 };
 
-static void pdc_console_poll(unsigned long unused)
+static void pdc_console_poll(struct timer_list *unused)
 {
 	int data, count = 0;
-	struct tty_struct *tty = tty_port_tty_get(&tty_port);
-
-	if (!tty)
-		return;
 
 	while (1) {
 		data = pdc_console_poll_key(NULL);
 		if (data == -1)
 			break;
-		tty_insert_flip_char(tty, data & 0xFF, TTY_NORMAL);
+		tty_insert_flip_char(&tty_port, data & 0xFF, TTY_NORMAL);
 		count ++;
 	}
 
 	if (count)
-		tty_flip_buffer_push(tty);
-
-	tty_kref_put(tty);
+		tty_flip_buffer_push(&tty_port);
 
 	if (pdc_cons.flags & CON_ENABLED)
 		mod_timer(&pdc_console_timer, jiffies + PDC_CONS_POLL_DELAY);
@@ -186,12 +166,12 @@ static int __init pdc_console_tty_driver_init(void)
 	printk(KERN_INFO "The PDC console driver is still registered, removing CON_BOOT flag\n");
 	pdc_cons.flags &= ~CON_BOOT;
 
-	tty_port_init(&tty_port);
-
 	pdc_console_tty_driver = alloc_tty_driver(1);
 
 	if (!pdc_console_tty_driver)
 		return -ENOMEM;
+
+	tty_port_init(&tty_port);
 
 	pdc_console_tty_driver->driver_name = "pdc_cons";
 	pdc_console_tty_driver->name = "ttyB";
@@ -202,17 +182,18 @@ static int __init pdc_console_tty_driver_init(void)
 	pdc_console_tty_driver->flags = TTY_DRIVER_REAL_RAW |
 		TTY_DRIVER_RESET_TERMIOS;
 	tty_set_operations(pdc_console_tty_driver, &pdc_console_tty_ops);
+	tty_port_link_device(&tty_port, pdc_console_tty_driver, 0);
 
 	err = tty_register_driver(pdc_console_tty_driver);
 	if (err) {
 		printk(KERN_ERR "Unable to register the PDC console TTY driver\n");
+		tty_port_destroy(&tty_port);
 		return err;
 	}
 
 	return 0;
 }
-
-module_init(pdc_console_tty_driver_init);
+device_initcall(pdc_console_tty_driver_init);
 
 static struct tty_driver * pdc_console_device (struct console *c, int *index)
 {

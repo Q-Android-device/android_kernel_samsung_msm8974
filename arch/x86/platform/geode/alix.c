@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * System Specific setup for PCEngines ALIX.
  * At the moment this means setup of GPIO control of LEDs
  * on Alix.2/3/6 boards.
- *
  *
  * Copyright (C) 2008 Constantin Baranov <const@mimas.ru>
  * Copyright (C) 2011 Ed Wildgoose <kernel@wildgooses.com>
@@ -11,17 +11,13 @@
  * TODO: There are large similarities with leds-net5501.c
  * by Alessandro Zummo <a.zummo@towertech.it>
  * In the future leds-net5501.c should be migrated over to platform
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/string.h>
-#include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <linux/leds.h>
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
@@ -35,6 +31,11 @@
 #define BIOS_SIGNATURE_COREBOOT		0x500
 #define BIOS_REGION_SIZE		0x10000
 
+/*
+ * This driver is not modular, but to keep back compatibility
+ * with existing use cases, continuing with module_param is
+ * the easiest way forward.
+ */
 static bool force = 0;
 module_param(force, bool, 0444);
 /* FIXME: Award bios is not automatically detected as Alix platform */
@@ -98,7 +99,7 @@ static struct platform_device alix_leds_dev = {
 	.dev.platform_data = &alix_leds_data,
 };
 
-static struct __initdata platform_device *alix_devs[] = {
+static struct platform_device *alix_devs[] __initdata = {
 	&alix_buttons_dev,
 	&alix_leds_dev,
 };
@@ -192,9 +193,4 @@ static int __init alix_init(void)
 
 	return 0;
 }
-
-module_init(alix_init);
-
-MODULE_AUTHOR("Ed Wildgoose <kernel@wildgooses.com>");
-MODULE_DESCRIPTION("PCEngines ALIX System Setup");
-MODULE_LICENSE("GPL");
+device_initcall(alix_init);

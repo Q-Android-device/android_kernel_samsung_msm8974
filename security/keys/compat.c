@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* 32-bit compatibility syscall for 64-bit systems
  *
  * Copyright (C) 2004-5 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #include <linux/syscalls.h>
@@ -24,37 +20,28 @@
  *
  * If successful, 0 will be returned.
  */
-long compat_keyctl_instantiate_key_iov(
+static long compat_keyctl_instantiate_key_iov(
 	key_serial_t id,
 	const struct compat_iovec __user *_payload_iov,
 	unsigned ioc,
 	key_serial_t ringid)
 {
 	struct iovec iovstack[UIO_FASTIOV], *iov = iovstack;
+	struct iov_iter from;
 	long ret;
 
-	if (_payload_iov == 0 || ioc == 0)
-		goto no_payload;
+	if (!_payload_iov)
+		ioc = 0;
 
-	ret = compat_rw_copy_check_uvector(WRITE, _payload_iov, ioc,
-					   ARRAY_SIZE(iovstack),
-					   iovstack, &iov, 1);
+	ret = compat_import_iovec(WRITE, _payload_iov, ioc,
+				  ARRAY_SIZE(iovstack), &iov,
+				  &from);
 	if (ret < 0)
-		goto err;
-	if (ret == 0)
-		goto no_payload_free;
+		return ret;
 
-	ret = keyctl_instantiate_key_common(id, iov, ioc, ret, ringid);
-err:
-	if (iov != iovstack)
-		kfree(iov);
+	ret = keyctl_instantiate_key_common(id, &from, ringid);
+	kfree(iov);
 	return ret;
-
-no_payload_free:
-	if (iov != iovstack)
-		kfree(iov);
-no_payload:
-	return keyctl_instantiate_key_common(id, NULL, 0, 0, ringid);
 }
 
 /*
@@ -65,8 +52,8 @@ no_payload:
  * taking a 32-bit syscall are zero.  If you can, you should call sys_keyctl()
  * directly.
  */
-asmlinkage long compat_sys_keyctl(u32 option,
-				  u32 arg2, u32 arg3, u32 arg4, u32 arg5)
+COMPAT_SYSCALL_DEFINE5(keyctl, u32, option,
+		       u32, arg2, u32, arg3, u32, arg4, u32, arg5)
 {
 	switch (option) {
 	case KEYCTL_GET_KEYRING_ID:
@@ -134,6 +121,39 @@ asmlinkage long compat_sys_keyctl(u32 option,
 	case KEYCTL_INSTANTIATE_IOV:
 		return compat_keyctl_instantiate_key_iov(
 			arg2, compat_ptr(arg3), arg4, arg5);
+
+	case KEYCTL_INVALIDATE:
+		return keyctl_invalidate_key(arg2);
+
+	case KEYCTL_GET_PERSISTENT:
+		return keyctl_get_persistent(arg2, arg3);
+
+	case KEYCTL_DH_COMPUTE:
+		return compat_keyctl_dh_compute(compat_ptr(arg2),
+						compat_ptr(arg3),
+						arg4, compat_ptr(arg5));
+
+	case KEYCTL_RESTRICT_KEYRING:
+		return keyctl_restrict_keyring(arg2, compat_ptr(arg3),
+					       compat_ptr(arg4));
+
+	case KEYCTL_PKEY_QUERY:
+		if (arg3 != 0)
+			return -EINVAL;
+		return keyctl_pkey_query(arg2,
+					 compat_ptr(arg4),
+					 compat_ptr(arg5));
+
+	case KEYCTL_PKEY_ENCRYPT:
+	case KEYCTL_PKEY_DECRYPT:
+	case KEYCTL_PKEY_SIGN:
+		return keyctl_pkey_e_d_s(option,
+					 compat_ptr(arg2), compat_ptr(arg3),
+					 compat_ptr(arg4), compat_ptr(arg5));
+
+	case KEYCTL_PKEY_VERIFY:
+		return keyctl_pkey_verify(compat_ptr(arg2), compat_ptr(arg3),
+					  compat_ptr(arg4), compat_ptr(arg5));
 
 	default:
 		return -EOPNOTSUPP;

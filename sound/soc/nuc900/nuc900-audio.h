@@ -1,12 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2010 Nuvoton technology corporation.
  *
  * Wan ZongShun <mcuos.com@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation;version 2 of the License.
- *
  */
 
 #ifndef _NUC900_AUDIO_H
@@ -100,10 +96,7 @@
 struct nuc900_audio {
 	void __iomem *mmio;
 	spinlock_t lock;
-	dma_addr_t dma_addr[2];
-	unsigned long buffersize[2];
 	unsigned long irq_num;
-	struct snd_pcm_substream *substream;
 	struct resource *res;
 	struct clk *clk;
 	struct device *dev;

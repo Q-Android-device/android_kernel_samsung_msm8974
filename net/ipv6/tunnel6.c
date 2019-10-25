@@ -1,23 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C)2003,2004 USAGI/WIDE Project
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
  * Authors	Mitsuru KANDA  <mk@linux-ipv6.org>
- * 		YOSHIFUJI Hideaki <yoshfuji@linux-ipv6.org>
+ *		YOSHIFUJI Hideaki <yoshfuji@linux-ipv6.org>
  */
+
+#define pr_fmt(fmt) "IPv6: " fmt
 
 #include <linux/icmpv6.h>
 #include <linux/init.h>
@@ -63,7 +52,6 @@ err:
 
 	return ret;
 }
-
 EXPORT_SYMBOL(xfrm6_tunnel_register);
 
 int xfrm6_tunnel_deregister(struct xfrm6_tunnel *handler, unsigned short family)
@@ -91,7 +79,6 @@ int xfrm6_tunnel_deregister(struct xfrm6_tunnel *handler, unsigned short family)
 
 	return ret;
 }
-
 EXPORT_SYMBOL(xfrm6_tunnel_deregister);
 
 #define for_each_tunnel_rcu(head, handler)		\
@@ -135,24 +122,28 @@ drop:
 	return 0;
 }
 
-static void tunnel6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
+static int tunnel6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 			u8 type, u8 code, int offset, __be32 info)
 {
 	struct xfrm6_tunnel *handler;
 
 	for_each_tunnel_rcu(tunnel6_handlers, handler)
 		if (!handler->err_handler(skb, opt, type, code, offset, info))
-			break;
+			return 0;
+
+	return -ENOENT;
 }
 
-static void tunnel46_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
+static int tunnel46_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 			 u8 type, u8 code, int offset, __be32 info)
 {
 	struct xfrm6_tunnel *handler;
 
 	for_each_tunnel_rcu(tunnel46_handlers, handler)
 		if (!handler->err_handler(skb, opt, type, code, offset, info))
-			break;
+			return 0;
+
+	return -ENOENT;
 }
 
 static const struct inet6_protocol tunnel6_protocol = {
@@ -170,11 +161,11 @@ static const struct inet6_protocol tunnel46_protocol = {
 static int __init tunnel6_init(void)
 {
 	if (inet6_add_protocol(&tunnel6_protocol, IPPROTO_IPV6)) {
-		printk(KERN_ERR "tunnel6 init(): can't add protocol\n");
+		pr_err("%s: can't add protocol\n", __func__);
 		return -EAGAIN;
 	}
 	if (inet6_add_protocol(&tunnel46_protocol, IPPROTO_IPIP)) {
-		printk(KERN_ERR "tunnel6 init(): can't add protocol\n");
+		pr_err("%s: can't add protocol\n", __func__);
 		inet6_del_protocol(&tunnel6_protocol, IPPROTO_IPV6);
 		return -EAGAIN;
 	}
@@ -184,9 +175,9 @@ static int __init tunnel6_init(void)
 static void __exit tunnel6_fini(void)
 {
 	if (inet6_del_protocol(&tunnel46_protocol, IPPROTO_IPIP))
-		printk(KERN_ERR "tunnel6 close: can't remove protocol\n");
+		pr_err("%s: can't remove protocol\n", __func__);
 	if (inet6_del_protocol(&tunnel6_protocol, IPPROTO_IPV6))
-		printk(KERN_ERR "tunnel6 close: can't remove protocol\n");
+		pr_err("%s: can't remove protocol\n", __func__);
 }
 
 module_init(tunnel6_init);

@@ -1,16 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (c) 1996, 2003 VIA Networking Technologies, Inc.
  * All rights reserved.
- *
- * This software may be redistributed and/or modified under
- * the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or
- * any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
- * or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
- * for more details.
  *
  * File: via-velocity.h
  *
@@ -1265,7 +1256,7 @@ struct velocity_context {
 #define PHYID_VT3216_64BIT  0x000FC600UL
 #define PHYID_MARVELL_1000  0x01410C50UL
 #define PHYID_MARVELL_1000S 0x01410C40UL
-
+#define PHYID_ICPLUS_IP101A 0x02430C54UL
 #define PHYID_REV_ID_MASK   0x0000000FUL
 
 #define PHYID_GET_PHY_ID(i)         ((i) & ~PHYID_REV_ID_MASK)
@@ -1434,8 +1425,10 @@ struct velocity_opt {
 #define GET_RD_BY_IDX(vptr, idx)   (vptr->rd_ring[idx])
 
 struct velocity_info {
+	struct device *dev;
 	struct pci_dev *pdev;
-	struct net_device *dev;
+	struct net_device *netdev;
+	int no_eeprom;
 
 	unsigned long active_vlans[BITS_TO_LONGS(VLAN_N_VID)];
 	u8 ip_addr[4];
@@ -1514,7 +1507,7 @@ static inline int velocity_get_ip(struct velocity_info *vptr)
 	int res = -ENOENT;
 
 	rcu_read_lock();
-	in_dev = __in_dev_get_rcu(vptr->dev);
+	in_dev = __in_dev_get_rcu(vptr->netdev);
 	if (in_dev != NULL) {
 		ifa = (struct in_ifaddr *) in_dev->ifa_list;
 		if (ifa != NULL) {

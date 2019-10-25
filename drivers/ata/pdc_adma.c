@@ -1,42 +1,25 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  pdc_adma.c - Pacific Digital Corporation ADMA
  *
- *  Maintained by:  Mark Lord <mlord@pobox.com>
+ *  Maintained by:  Tejun Heo <tj@kernel.org>
  *
  *  Copyright 2005 Mark Lord
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2, or (at your option)
- *  any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
- *
- *
  *  libata documentation is available via 'make {ps|pdf}docs',
- *  as Documentation/DocBook/libata.*
- *
+ *  as Documentation/driver-api/libata.rst
  *
  *  Supports ATA disks in single-packet ADMA mode.
  *  Uses PIO for everything else.
  *
  *  TODO:  Use ADMA transfers for ATAPI devices, when possible.
  *  This requires careful attention to a number of quirks of the chip.
- *
  */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/gfp.h>
 #include <linux/pci.h>
-#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
@@ -594,12 +577,12 @@ static int adma_set_dma_masks(struct pci_dev *pdev, void __iomem *mmio_base)
 {
 	int rc;
 
-	rc = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
+	rc = dma_set_mask(&pdev->dev, DMA_BIT_MASK(32));
 	if (rc) {
 		dev_err(&pdev->dev, "32-bit DMA enable failed\n");
 		return rc;
 	}
-	rc = pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(32));
+	rc = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
 	if (rc) {
 		dev_err(&pdev->dev, "32-bit consistent DMA enable failed\n");
 		return rc;
@@ -660,21 +643,10 @@ static int adma_ata_init_one(struct pci_dev *pdev,
 				 &adma_ata_sht);
 }
 
-static int __init adma_ata_init(void)
-{
-	return pci_register_driver(&adma_ata_pci_driver);
-}
-
-static void __exit adma_ata_exit(void)
-{
-	pci_unregister_driver(&adma_ata_pci_driver);
-}
+module_pci_driver(adma_ata_pci_driver);
 
 MODULE_AUTHOR("Mark Lord");
 MODULE_DESCRIPTION("Pacific Digital Corporation ADMA low-level driver");
 MODULE_LICENSE("GPL");
 MODULE_DEVICE_TABLE(pci, adma_ata_pci_tbl);
 MODULE_VERSION(DRV_VERSION);
-
-module_init(adma_ata_init);
-module_exit(adma_ata_exit);

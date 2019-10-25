@@ -1,19 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * x86 decoder sanity test - based on test_get_insn.c
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  *
  * Copyright (C) IBM Corporation, 2009
  * Copyright (C) Hitachi, Ltd., 2011
@@ -55,7 +42,7 @@ static FILE		*input_file;	/* Input file name */
 static void usage(const char *err)
 {
 	if (err)
-		fprintf(stderr, "Error: %s\n\n", err);
+		fprintf(stderr, "%s: Error: %s\n\n", prog, err);
 	fprintf(stderr, "Usage: %s [-y|-n|-v] [-s seed[,no]] [-m max] [-i input]\n", prog);
 	fprintf(stderr, "\t-y	64bit mode\n");
 	fprintf(stderr, "\t-n	32bit mode\n");
@@ -254,7 +241,7 @@ int main(int argc, char **argv)
 			continue;
 
 		/* Decode an instruction */
-		insn_init(&insn, insn_buf, x86_64);
+		insn_init(&insn, insn_buf, sizeof(insn_buf), x86_64);
 		insn_get_length(&insn);
 
 		if (insn.next_byte <= insn.kaddr ||
@@ -269,7 +256,14 @@ int main(int argc, char **argv)
 		insns++;
 	}
 
-	fprintf(stdout, "%s: decoded and checked %d %s instructions with %d errors (seed:0x%x)\n", (errors) ? "Failure" : "Success", insns, (input_file) ? "given" : "random", errors, seed);
+	fprintf((errors) ? stderr : stdout,
+		"%s: %s: decoded and checked %d %s instructions with %d errors (seed:0x%x)\n",
+		prog,
+		(errors) ? "Failure" : "Success",
+		insns,
+		(input_file) ? "given" : "random",
+		errors,
+		seed);
 
 	return errors ? 1 : 0;
 }

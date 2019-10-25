@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * hwmon-vid.c - VID/VRM/VRD voltage conversions
  *
@@ -6,20 +7,6 @@
  * Partly imported from i2c-vid.h of the lm_sensors project
  * Copyright (c) 2002 Mark D. Studebaker <mdsxyz123@yahoo.com>
  * With assistance from Trent Piepho <xyzzy@speakeasy.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -115,6 +102,12 @@ int vid_from_reg(int val, u8 vrm)
 		return (val < 32) ? 1550 - 25 * val
 			: 775 - (25 * (val - 31)) / 2;
 
+	case 26:		/* AMD family 10h to 15h, serial VID */
+		val &= 0x7f;
+		if (val >= 0x7c)
+			return 0;
+		return DIV_ROUND_CLOSEST(15500 - 125 * val, 10);
+
 	case 91:		/* VRM 9.1 */
 	case 90:		/* VRM 9.0 */
 		val &= 0x1f;
@@ -195,6 +188,10 @@ static struct vrm_model vrm_models[] = {
 	{X86_VENDOR_AMD, 0xF, 0x40, 0x7F, ANY, 24},	/* NPT family 0Fh */
 	{X86_VENDOR_AMD, 0xF, 0x80, ANY, ANY, 25},	/* future fam. 0Fh */
 	{X86_VENDOR_AMD, 0x10, 0x0, ANY, ANY, 25},	/* NPT family 10h */
+	{X86_VENDOR_AMD, 0x11, 0x0, ANY, ANY, 26},	/* family 11h */
+	{X86_VENDOR_AMD, 0x12, 0x0, ANY, ANY, 26},	/* family 12h */
+	{X86_VENDOR_AMD, 0x14, 0x0, ANY, ANY, 26},	/* family 14h */
+	{X86_VENDOR_AMD, 0x15, 0x0, ANY, ANY, 26},	/* family 15h */
 
 	{X86_VENDOR_INTEL, 0x6, 0x0, 0x6, ANY, 82},	/* Pentium Pro,
 							 * Pentium II, Xeon,
@@ -236,7 +233,7 @@ static struct vrm_model vrm_models[] = {
  */
 static u8 get_via_model_d_vrm(void)
 {
-	unsigned int vid, brand, dummy;
+	unsigned int vid, brand, __maybe_unused dummy;
 	static const char *brands[4] = {
 		"C7-M", "C7", "Eden", "C7-D"
 	};
@@ -283,7 +280,7 @@ u8 vid_which_vrm(void)
 	if (c->x86 < 6)		/* Any CPU with family lower than 6 */
 		return 0;	/* doesn't have VID */
 
-	vrm_ret = find_vrm(c->x86, c->x86_model, c->x86_mask, c->x86_vendor);
+	vrm_ret = find_vrm(c->x86, c->x86_model, c->x86_stepping, c->x86_vendor);
 	if (vrm_ret == 134)
 		vrm_ret = get_via_model_d_vrm();
 	if (vrm_ret == 0)

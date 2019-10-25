@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* xfrm4_tunnel.c: Generic IP tunnel transformer.
  *
  * Copyright (C) 2003 David S. Miller (davem@redhat.com)
@@ -63,7 +64,7 @@ static int xfrm_tunnel_err(struct sk_buff *skb, u32 info)
 static struct xfrm_tunnel xfrm_tunnel_handler __read_mostly = {
 	.handler	=	xfrm_tunnel_rcv,
 	.err_handler	=	xfrm_tunnel_err,
-	.priority	=	2,
+	.priority	=	3,
 };
 
 #if IS_ENABLED(CONFIG_IPV6)

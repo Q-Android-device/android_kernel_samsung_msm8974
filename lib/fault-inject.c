@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/random.h>
@@ -40,17 +41,23 @@ EXPORT_SYMBOL_GPL(setup_fault_attr);
 
 static void fail_dump(struct fault_attr *attr)
 {
-	if (attr->verbose > 0)
-		printk(KERN_NOTICE "FAULT_INJECTION: forcing a failure\n");
-	if (attr->verbose > 1)
-		dump_stack();
+	if (attr->verbose > 0 && __ratelimit(&attr->ratelimit_state)) {
+		printk(KERN_NOTICE "FAULT_INJECTION: forcing a failure.\n"
+		       "name %pd, interval %lu, probability %lu, "
+		       "space %d, times %d\n", attr->dname,
+		       attr->interval, attr->probability,
+		       atomic_read(&attr->space),
+		       atomic_read(&attr->times));
+		if (attr->verbose > 1)
+			dump_stack();
+	}
 }
 
 #define atomic_dec_not_zero(v)		atomic_add_unless((v), -1, 0)
 
 static bool fail_task(struct fault_attr *attr, struct task_struct *task)
 {
-	return !in_interrupt() && task->make_it_fail;
+	return in_task() && task->make_it_fail;
 }
 
 #define MAX_STACK_TRACE_DEPTH 32
@@ -59,22 +66,16 @@ static bool fail_task(struct fault_attr *attr, struct task_struct *task)
 
 static bool fail_stacktrace(struct fault_attr *attr)
 {
-	struct stack_trace trace;
 	int depth = attr->stacktrace_depth;
 	unsigned long entries[MAX_STACK_TRACE_DEPTH];
-	int n;
+	int n, nr_entries;
 	bool found = (attr->require_start == 0 && attr->require_end == ULONG_MAX);
 
 	if (depth == 0)
 		return found;
 
-	trace.nr_entries = 0;
-	trace.entries = entries;
-	trace.max_entries = depth;
-	trace.skip = 1;
-
-	save_stack_trace(&trace);
-	for (n = 0; n < trace.nr_entries; n++) {
+	nr_entries = stack_trace_save(entries, depth, 1);
+	for (n = 0; n < nr_entries; n++) {
 		if (attr->reject_start <= entries[n] &&
 			       entries[n] < attr->reject_end)
 			return false;
@@ -101,6 +102,21 @@ static inline bool fail_stacktrace(struct fault_attr *attr)
 
 bool should_fail(struct fault_attr *attr, ssize_t size)
 {
+	if (in_task()) {
+		unsigned int fail_nth = READ_ONCE(current->fail_nth);
+
+		if (fail_nth) {
+			if (!WRITE_ONCE(current->fail_nth, fail_nth - 1))
+				goto fail;
+
+			return false;
+		}
+	}
+
+	/* No need to check any other properties if the probability is 0 */
+	if (attr->probability == 0)
+		return false;
+
 	if (attr->task_filter && !fail_task(attr, current))
 		return false;
 
@@ -118,12 +134,13 @@ bool should_fail(struct fault_attr *attr, ssize_t size)
 			return false;
 	}
 
-	if (attr->probability <= random32() % 100)
+	if (attr->probability <= prandom_u32() % 100)
 		return false;
 
 	if (!fail_stacktrace(attr))
 		return false;
 
+fail:
 	fail_dump(attr);
 
 	if (atomic_read(&attr->times) != -1)
@@ -198,6 +215,12 @@ struct dentry *fault_create_debugfs_attr(const char *name,
 		goto fail;
 	if (!debugfs_create_ul("verbose", mode, dir, &attr->verbose))
 		goto fail;
+	if (!debugfs_create_u32("verbose_ratelimit_interval_ms", mode, dir,
+				&attr->ratelimit_state.interval))
+		goto fail;
+	if (!debugfs_create_u32("verbose_ratelimit_burst", mode, dir,
+				&attr->ratelimit_state.burst))
+		goto fail;
 	if (!debugfs_create_bool("task-filter", mode, dir, &attr->task_filter))
 		goto fail;
 
@@ -218,6 +241,7 @@ struct dentry *fault_create_debugfs_attr(const char *name,
 
 #endif /* CONFIG_FAULT_INJECTION_STACKTRACE_FILTER */
 
+	attr->dname = dget(dir);
 	return dir;
 fail:
 	debugfs_remove_recursive(dir);

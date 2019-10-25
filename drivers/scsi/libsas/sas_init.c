@@ -1,26 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Serial Attached SCSI (SAS) Transport Layer initialization
  *
  * Copyright (C) 2005 Adaptec, Inc.  All rights reserved.
  * Copyright (C) 2005 Luben Tuikov <luben_tuikov@adaptec.com>
- *
- * This file is licensed under GPLv2.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
- * USA
- *
  */
 
 #include <linux/module.h>
@@ -39,27 +22,46 @@
 #include "../scsi_sas_internal.h"
 
 static struct kmem_cache *sas_task_cache;
+static struct kmem_cache *sas_event_cache;
 
 struct sas_task *sas_alloc_task(gfp_t flags)
 {
 	struct sas_task *task = kmem_cache_zalloc(sas_task_cache, flags);
 
 	if (task) {
-		INIT_LIST_HEAD(&task->list);
 		spin_lock_init(&task->task_state_lock);
 		task->task_state_flags = SAS_TASK_STATE_PENDING;
-		init_timer(&task->timer);
-		init_completion(&task->completion);
 	}
 
 	return task;
 }
 EXPORT_SYMBOL_GPL(sas_alloc_task);
 
+struct sas_task *sas_alloc_slow_task(gfp_t flags)
+{
+	struct sas_task *task = sas_alloc_task(flags);
+	struct sas_task_slow *slow = kmalloc(sizeof(*slow), flags);
+
+	if (!task || !slow) {
+		if (task)
+			kmem_cache_free(sas_task_cache, task);
+		kfree(slow);
+		return NULL;
+	}
+
+	task->slow_task = slow;
+	slow->task = task;
+	timer_setup(&slow->timer, NULL, 0);
+	init_completion(&slow->completion);
+
+	return task;
+}
+EXPORT_SYMBOL_GPL(sas_alloc_slow_task);
+
 void sas_free_task(struct sas_task *task)
 {
 	if (task) {
-		BUG_ON(!list_empty(&task->list));
+		kfree(task->slow_task);
 		kmem_cache_free(sas_task_cache, task);
 	}
 }
@@ -68,88 +70,83 @@ EXPORT_SYMBOL_GPL(sas_free_task);
 /*------------ SAS addr hash -----------*/
 void sas_hash_addr(u8 *hashed, const u8 *sas_addr)
 {
-        const u32 poly = 0x00DB2777;
-        u32     r = 0;
-        int     i;
+	const u32 poly = 0x00DB2777;
+	u32 r = 0;
+	int i;
 
-        for (i = 0; i < 8; i++) {
-                int b;
-                for (b = 7; b >= 0; b--) {
-                        r <<= 1;
-                        if ((1 << b) & sas_addr[i]) {
-                                if (!(r & 0x01000000))
-                                        r ^= poly;
-                        } else if (r & 0x01000000)
-                                r ^= poly;
-                }
-        }
+	for (i = 0; i < SAS_ADDR_SIZE; i++) {
+		int b;
 
-        hashed[0] = (r >> 16) & 0xFF;
-        hashed[1] = (r >> 8) & 0xFF ;
-        hashed[2] = r & 0xFF;
-}
+		for (b = (SAS_ADDR_SIZE - 1); b >= 0; b--) {
+			r <<= 1;
+			if ((1 << b) & sas_addr[i]) {
+				if (!(r & 0x01000000))
+					r ^= poly;
+			} else if (r & 0x01000000) {
+				r ^= poly;
+			}
+		}
+	}
 
-
-/* ---------- HA events ---------- */
-
-void sas_hae_reset(struct work_struct *work)
-{
-	struct sas_ha_event *ev = to_sas_ha_event(work);
-	struct sas_ha_struct *ha = ev->ha;
-
-	clear_bit(HAE_RESET, &ha->pending);
+	hashed[0] = (r >> 16) & 0xFF;
+	hashed[1] = (r >> 8) & 0xFF;
+	hashed[2] = r & 0xFF;
 }
 
 int sas_register_ha(struct sas_ha_struct *sas_ha)
 {
+	char name[64];
 	int error = 0;
 
 	mutex_init(&sas_ha->disco_mutex);
 	spin_lock_init(&sas_ha->phy_port_lock);
 	sas_hash_addr(sas_ha->hashed_sas_addr, sas_ha->sas_addr);
 
-	if (sas_ha->lldd_queue_size == 0)
-		sas_ha->lldd_queue_size = 1;
-	else if (sas_ha->lldd_queue_size == -1)
-		sas_ha->lldd_queue_size = 128; /* Sanity */
-
 	set_bit(SAS_HA_REGISTERED, &sas_ha->state);
-	spin_lock_init(&sas_ha->state_lock);
+	spin_lock_init(&sas_ha->lock);
 	mutex_init(&sas_ha->drain_mutex);
+	init_waitqueue_head(&sas_ha->eh_wait_q);
 	INIT_LIST_HEAD(&sas_ha->defer_q);
+	INIT_LIST_HEAD(&sas_ha->eh_dev_q);
+
+	sas_ha->event_thres = SAS_PHY_SHUTDOWN_THRES;
 
 	error = sas_register_phys(sas_ha);
 	if (error) {
-		printk(KERN_NOTICE "couldn't register sas phys:%d\n", error);
+		pr_notice("couldn't register sas phys:%d\n", error);
 		return error;
 	}
 
 	error = sas_register_ports(sas_ha);
 	if (error) {
-		printk(KERN_NOTICE "couldn't register sas ports:%d\n", error);
+		pr_notice("couldn't register sas ports:%d\n", error);
 		goto Undo_phys;
 	}
 
 	error = sas_init_events(sas_ha);
 	if (error) {
-		printk(KERN_NOTICE "couldn't start event thread:%d\n", error);
+		pr_notice("couldn't start event thread:%d\n", error);
 		goto Undo_ports;
 	}
 
-	if (sas_ha->lldd_max_execute_num > 1) {
-		error = sas_init_queue(sas_ha);
-		if (error) {
-			printk(KERN_NOTICE "couldn't start queue thread:%d, "
-			       "running in direct mode\n", error);
-			sas_ha->lldd_max_execute_num = 1;
-		}
-	}
+	error = -ENOMEM;
+	snprintf(name, sizeof(name), "%s_event_q", dev_name(sas_ha->dev));
+	sas_ha->event_q = create_singlethread_workqueue(name);
+	if (!sas_ha->event_q)
+		goto Undo_ports;
+
+	snprintf(name, sizeof(name), "%s_disco_q", dev_name(sas_ha->dev));
+	sas_ha->disco_q = create_singlethread_workqueue(name);
+	if (!sas_ha->disco_q)
+		goto Undo_event_q;
 
 	INIT_LIST_HEAD(&sas_ha->eh_done_q);
 	INIT_LIST_HEAD(&sas_ha->eh_ata_q);
 
 	return 0;
 
+Undo_event_q:
+	destroy_workqueue(sas_ha->event_q);
 Undo_ports:
 	sas_unregister_ports(sas_ha);
 Undo_phys:
@@ -157,18 +154,22 @@ Undo_phys:
 	return error;
 }
 
-int sas_unregister_ha(struct sas_ha_struct *sas_ha)
+static void sas_disable_events(struct sas_ha_struct *sas_ha)
 {
 	/* Set the state to unregistered to avoid further unchained
 	 * events to be queued, and flush any in-progress drainers
 	 */
 	mutex_lock(&sas_ha->drain_mutex);
-	spin_lock_irq(&sas_ha->state_lock);
+	spin_lock_irq(&sas_ha->lock);
 	clear_bit(SAS_HA_REGISTERED, &sas_ha->state);
-	spin_unlock_irq(&sas_ha->state_lock);
+	spin_unlock_irq(&sas_ha->lock);
 	__sas_drain_work(sas_ha);
 	mutex_unlock(&sas_ha->drain_mutex);
+}
 
+int sas_unregister_ha(struct sas_ha_struct *sas_ha)
+{
+	sas_disable_events(sas_ha);
 	sas_unregister_ports(sas_ha);
 
 	/* flush unregistration work */
@@ -176,10 +177,8 @@ int sas_unregister_ha(struct sas_ha_struct *sas_ha)
 	__sas_drain_work(sas_ha);
 	mutex_unlock(&sas_ha->drain_mutex);
 
-	if (sas_ha->lldd_max_execute_num > 1) {
-		sas_shutdown_queue(sas_ha);
-		sas_ha->lldd_max_execute_num = 1;
-	}
+	destroy_workqueue(sas_ha->disco_q);
+	destroy_workqueue(sas_ha->event_q);
 
 	return 0;
 }
@@ -220,7 +219,7 @@ int sas_try_ata_reset(struct asd_sas_phy *asd_phy)
 	return -ENODEV;
 }
 
-/**
+/*
  * transport_sas_phy_reset - reset a phy and permit libata to manage the link
  *
  * phy reset request via sysfs in host workqueue context so we know we
@@ -360,6 +359,88 @@ int sas_set_phy_speed(struct sas_phy *phy,
 	return ret;
 }
 
+void sas_prep_resume_ha(struct sas_ha_struct *ha)
+{
+	int i;
+
+	set_bit(SAS_HA_REGISTERED, &ha->state);
+
+	/* clear out any stale link events/data from the suspension path */
+	for (i = 0; i < ha->num_phys; i++) {
+		struct asd_sas_phy *phy = ha->sas_phy[i];
+
+		memset(phy->attached_sas_addr, 0, SAS_ADDR_SIZE);
+		phy->frame_rcvd_size = 0;
+	}
+}
+EXPORT_SYMBOL(sas_prep_resume_ha);
+
+static int phys_suspended(struct sas_ha_struct *ha)
+{
+	int i, rc = 0;
+
+	for (i = 0; i < ha->num_phys; i++) {
+		struct asd_sas_phy *phy = ha->sas_phy[i];
+
+		if (phy->suspended)
+			rc++;
+	}
+
+	return rc;
+}
+
+void sas_resume_ha(struct sas_ha_struct *ha)
+{
+	const unsigned long tmo = msecs_to_jiffies(25000);
+	int i;
+
+	/* deform ports on phys that did not resume
+	 * at this point we may be racing the phy coming back (as posted
+	 * by the lldd).  So we post the event and once we are in the
+	 * libsas context check that the phy remains suspended before
+	 * tearing it down.
+	 */
+	i = phys_suspended(ha);
+	if (i)
+		dev_info(ha->dev, "waiting up to 25 seconds for %d phy%s to resume\n",
+			 i, i > 1 ? "s" : "");
+	wait_event_timeout(ha->eh_wait_q, phys_suspended(ha) == 0, tmo);
+	for (i = 0; i < ha->num_phys; i++) {
+		struct asd_sas_phy *phy = ha->sas_phy[i];
+
+		if (phy->suspended) {
+			dev_warn(&phy->phy->dev, "resume timeout\n");
+			sas_notify_phy_event(phy, PHYE_RESUME_TIMEOUT);
+		}
+	}
+
+	/* all phys are back up or timed out, turn on i/o so we can
+	 * flush out disks that did not return
+	 */
+	scsi_unblock_requests(ha->core.shost);
+	sas_drain_work(ha);
+}
+EXPORT_SYMBOL(sas_resume_ha);
+
+void sas_suspend_ha(struct sas_ha_struct *ha)
+{
+	int i;
+
+	sas_disable_events(ha);
+	scsi_block_requests(ha->core.shost);
+	for (i = 0; i < ha->num_phys; i++) {
+		struct asd_sas_port *port = ha->sas_port[i];
+
+		sas_discover_event(port, DISCE_SUSPEND);
+	}
+
+	/* flush suspend events while unregistered */
+	mutex_lock(&ha->drain_mutex);
+	__sas_drain_work(ha);
+	mutex_unlock(&ha->drain_mutex);
+}
+EXPORT_SYMBOL(sas_suspend_ha);
+
 static void sas_phy_release(struct sas_phy *phy)
 {
 	kfree(phy->hostdata);
@@ -411,9 +492,9 @@ static int queue_phy_reset(struct sas_phy *phy, int hard_reset)
 	d->reset_result = 0;
 	d->hard_reset = hard_reset;
 
-	spin_lock_irq(&ha->state_lock);
+	spin_lock_irq(&ha->lock);
 	sas_queue_work(ha, &d->reset_work);
-	spin_unlock_irq(&ha->state_lock);
+	spin_unlock_irq(&ha->lock);
 
 	rc = sas_drain_work(ha);
 	if (rc == 0)
@@ -438,9 +519,9 @@ static int queue_phy_enable(struct sas_phy *phy, int enable)
 	d->enable_result = 0;
 	d->enable = enable;
 
-	spin_lock_irq(&ha->state_lock);
+	spin_lock_irq(&ha->lock);
 	sas_queue_work(ha, &d->enable_work);
-	spin_unlock_irq(&ha->state_lock);
+	spin_unlock_irq(&ha->lock);
 
 	rc = sas_drain_work(ha);
 	if (rc == 0)
@@ -460,6 +541,37 @@ static struct sas_function_template sft = {
 	.smp_handler = sas_smp_handler,
 };
 
+static inline ssize_t phy_event_threshold_show(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct Scsi_Host *shost = class_to_shost(dev);
+	struct sas_ha_struct *sha = SHOST_TO_SAS_HA(shost);
+
+	return scnprintf(buf, PAGE_SIZE, "%u\n", sha->event_thres);
+}
+
+static inline ssize_t phy_event_threshold_store(struct device *dev,
+			struct device_attribute *attr,
+			const char *buf, size_t count)
+{
+	struct Scsi_Host *shost = class_to_shost(dev);
+	struct sas_ha_struct *sha = SHOST_TO_SAS_HA(shost);
+
+	sha->event_thres = simple_strtol(buf, NULL, 10);
+
+	/* threshold cannot be set too small */
+	if (sha->event_thres < 32)
+		sha->event_thres = 32;
+
+	return count;
+}
+
+DEVICE_ATTR(phy_event_threshold,
+	S_IRUGO|S_IWUSR,
+	phy_event_threshold_show,
+	phy_event_threshold_store);
+EXPORT_SYMBOL_GPL(dev_attr_phy_event_threshold);
+
 struct scsi_transport_template *
 sas_domain_attach_transport(struct sas_domain_function_template *dft)
 {
@@ -472,7 +584,6 @@ sas_domain_attach_transport(struct sas_domain_function_template *dft)
 	i = to_sas_internal(stt);
 	i->dft = dft;
 	stt->create_work_queue = 1;
-	stt->eh_timed_out = sas_scsi_timed_out;
 	stt->eh_strategy_handler = sas_scsi_recover_host;
 
 	return stt;
@@ -480,11 +591,46 @@ sas_domain_attach_transport(struct sas_domain_function_template *dft)
 EXPORT_SYMBOL_GPL(sas_domain_attach_transport);
 
 
-void sas_domain_release_transport(struct scsi_transport_template *stt)
+struct asd_sas_event *sas_alloc_event(struct asd_sas_phy *phy)
 {
-	sas_release_transport(stt);
+	struct asd_sas_event *event;
+	gfp_t flags = in_interrupt() ? GFP_ATOMIC : GFP_KERNEL;
+	struct sas_ha_struct *sas_ha = phy->ha;
+	struct sas_internal *i =
+		to_sas_internal(sas_ha->core.shost->transportt);
+
+	event = kmem_cache_zalloc(sas_event_cache, flags);
+	if (!event)
+		return NULL;
+
+	atomic_inc(&phy->event_nr);
+
+	if (atomic_read(&phy->event_nr) > phy->ha->event_thres) {
+		if (i->dft->lldd_control_phy) {
+			if (cmpxchg(&phy->in_shutdown, 0, 1) == 0) {
+				pr_notice("The phy%d bursting events, shut it down.\n",
+					  phy->id);
+				sas_notify_phy_event(phy, PHYE_SHUTDOWN);
+			}
+		} else {
+			/* Do not support PHY control, stop allocating events */
+			WARN_ONCE(1, "PHY control not supported.\n");
+			kmem_cache_free(sas_event_cache, event);
+			atomic_dec(&phy->event_nr);
+			event = NULL;
+		}
+	}
+
+	return event;
 }
-EXPORT_SYMBOL_GPL(sas_domain_release_transport);
+
+void sas_free_event(struct asd_sas_event *event)
+{
+	struct asd_sas_phy *phy = event->phy;
+
+	kmem_cache_free(sas_event_cache, event);
+	atomic_dec(&phy->event_nr);
+}
 
 /* ---------- SAS Class register/unregister ---------- */
 
@@ -492,14 +638,23 @@ static int __init sas_class_init(void)
 {
 	sas_task_cache = KMEM_CACHE(sas_task, SLAB_HWCACHE_ALIGN);
 	if (!sas_task_cache)
-		return -ENOMEM;
+		goto out;
+
+	sas_event_cache = KMEM_CACHE(asd_sas_event, SLAB_HWCACHE_ALIGN);
+	if (!sas_event_cache)
+		goto free_task_kmem;
 
 	return 0;
+free_task_kmem:
+	kmem_cache_destroy(sas_task_cache);
+out:
+	return -ENOMEM;
 }
 
 static void __exit sas_class_exit(void)
 {
 	kmem_cache_destroy(sas_task_cache);
+	kmem_cache_destroy(sas_event_cache);
 }
 
 MODULE_AUTHOR("Luben Tuikov <luben_tuikov@adaptec.com>");

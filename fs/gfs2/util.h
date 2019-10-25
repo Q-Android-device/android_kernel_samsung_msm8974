@@ -1,31 +1,29 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) Sistina Software, Inc.  1997-2003 All rights reserved.
  * Copyright (C) 2004-2006 Red Hat, Inc.  All rights reserved.
- *
- * This copyrighted material is made available to anyone wishing to use,
- * modify, copy, or redistribute it subject to the terms and conditions
- * of the GNU General Public License version 2.
  */
 
 #ifndef __UTIL_DOT_H__
 #define __UTIL_DOT_H__
 
+#ifdef pr_fmt
+#undef pr_fmt
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+#endif
+
 #include <linux/mempool.h>
 
 #include "incore.h"
 
-#define fs_printk(level, fs, fmt, arg...) \
-	printk(level "GFS2: fsid=%s: " fmt , (fs)->sd_fsname , ## arg)
-
-#define fs_info(fs, fmt, arg...) \
-	fs_printk(KERN_INFO , fs , fmt , ## arg)
-
-#define fs_warn(fs, fmt, arg...) \
-	fs_printk(KERN_WARNING , fs , fmt , ## arg)
-
-#define fs_err(fs, fmt, arg...) \
-	fs_printk(KERN_ERR, fs , fmt , ## arg)
-
+#define fs_emerg(fs, fmt, ...)						\
+	pr_emerg("fsid=%s: " fmt, (fs)->sd_fsname, ##__VA_ARGS__)
+#define fs_warn(fs, fmt, ...)						\
+	pr_warn("fsid=%s: " fmt, (fs)->sd_fsname, ##__VA_ARGS__)
+#define fs_err(fs, fmt, ...)						\
+	pr_err("fsid=%s: " fmt, (fs)->sd_fsname, ##__VA_ARGS__)
+#define fs_info(fs, fmt, ...)						\
+	pr_info("fsid=%s: " fmt, (fs)->sd_fsname, ##__VA_ARGS__)
 
 void gfs2_assert_i(struct gfs2_sbd *sdp);
 
@@ -79,22 +77,18 @@ int gfs2_meta_check_ii(struct gfs2_sbd *sdp, struct buffer_head *bh,
 		       const char *type, const char *function,
 		       char *file, unsigned int line);
 
-static inline int gfs2_meta_check_i(struct gfs2_sbd *sdp,
-				    struct buffer_head *bh,
-				    const char *function,
-				    char *file, unsigned int line)
+static inline int gfs2_meta_check(struct gfs2_sbd *sdp,
+				    struct buffer_head *bh)
 {
 	struct gfs2_meta_header *mh = (struct gfs2_meta_header *)bh->b_data;
 	u32 magic = be32_to_cpu(mh->mh_magic);
-	if (unlikely(magic != GFS2_MAGIC))
-		return gfs2_meta_check_ii(sdp, bh, "magic number", function,
-					  file, line);
+	if (unlikely(magic != GFS2_MAGIC)) {
+		fs_err(sdp, "Magic number missing at %llu\n",
+		       (unsigned long long)bh->b_blocknr);
+		return -EIO;
+	}
 	return 0;
 }
-
-#define gfs2_meta_check(sdp, bh) \
-gfs2_meta_check_i((sdp), (bh), __func__, __FILE__, __LINE__)
-
 
 int gfs2_metatype_check_ii(struct gfs2_sbd *sdp, struct buffer_head *bh,
 			   u16 type, u16 t,
@@ -139,11 +133,15 @@ int gfs2_io_error_i(struct gfs2_sbd *sdp, const char *function,
 gfs2_io_error_i((sdp), __func__, __FILE__, __LINE__);
 
 
-int gfs2_io_error_bh_i(struct gfs2_sbd *sdp, struct buffer_head *bh,
-		       const char *function, char *file, unsigned int line);
+void gfs2_io_error_bh_i(struct gfs2_sbd *sdp, struct buffer_head *bh,
+			const char *function, char *file, unsigned int line,
+			bool withdraw);
+
+#define gfs2_io_error_bh_wd(sdp, bh) \
+gfs2_io_error_bh_i((sdp), (bh), __func__, __FILE__, __LINE__, true);
 
 #define gfs2_io_error_bh(sdp, bh) \
-gfs2_io_error_bh_i((sdp), (bh), __func__, __FILE__, __LINE__);
+gfs2_io_error_bh_i((sdp), (bh), __func__, __FILE__, __LINE__, false);
 
 
 extern struct kmem_cache *gfs2_glock_cachep;
@@ -152,7 +150,9 @@ extern struct kmem_cache *gfs2_inode_cachep;
 extern struct kmem_cache *gfs2_bufdata_cachep;
 extern struct kmem_cache *gfs2_rgrpd_cachep;
 extern struct kmem_cache *gfs2_quotad_cachep;
-extern mempool_t *gfs2_bh_pool;
+extern struct kmem_cache *gfs2_qadata_cachep;
+extern mempool_t *gfs2_page_pool;
+extern struct workqueue_struct *gfs2_control_wq;
 
 static inline unsigned int gfs2_tune_get_i(struct gfs2_tune *gt,
 					   unsigned int *p)
@@ -167,9 +167,7 @@ static inline unsigned int gfs2_tune_get_i(struct gfs2_tune *gt,
 #define gfs2_tune_get(sdp, field) \
 gfs2_tune_get_i(&(sdp)->sd_tune, &(sdp)->sd_tune.field)
 
-void gfs2_icbit_munge(struct gfs2_sbd *sdp, unsigned char **bitmap,
-		      unsigned int bit, int new_value);
-int gfs2_lm_withdraw(struct gfs2_sbd *sdp, char *fmt, ...);
+__printf(2, 3)
+int gfs2_lm_withdraw(struct gfs2_sbd *sdp, const char *fmt, ...);
 
 #endif /* __UTIL_DOT_H__ */
-

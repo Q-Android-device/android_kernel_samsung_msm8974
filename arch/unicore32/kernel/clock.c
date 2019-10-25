@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/arch/unicore32/kernel/clock.c
  *
@@ -5,10 +6,6 @@
  *
  *	Maintained by GUAN Xue-tao <gxt@mprc.pku.edu.cn>
  *	Copyright (C) 2001-2010 Guan Xuetao
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -179,7 +176,7 @@ int clk_set_rate(struct clk *clk, unsigned long rate)
 	}
 #ifdef CONFIG_CPU_FREQ
 	if (clk == &clk_mclk_clk) {
-		u32 pll_rate, divstatus = PM_DIVSTATUS;
+		u32 pll_rate, divstatus = readl(PM_DIVSTATUS);
 		int ret, i;
 
 		/* lookup mclk_clk_table */
@@ -201,10 +198,10 @@ int clk_set_rate(struct clk *clk, unsigned long rate)
 				/ (((divstatus & 0x0000f000) >> 12) + 1);
 
 		/* set pll sys cfg reg. */
-		PM_PLLSYSCFG = pll_rate;
+		writel(pll_rate, PM_PLLSYSCFG);
 
-		PM_PMCR = PM_PMCR_CFBSYS;
-		while ((PM_PLLDFCDONE & PM_PLLDFCDONE_SYSDFC)
+		writel(PM_PMCR_CFBSYS, PM_PMCR);
+		while ((readl(PM_PLLDFCDONE) & PM_PLLDFCDONE_SYSDFC)
 				!= PM_PLLDFCDONE_SYSDFC)
 			udelay(100);
 			/* about 1ms */

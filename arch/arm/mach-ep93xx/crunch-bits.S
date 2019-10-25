@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * arch/arm/kernel/crunch-bits.S
  * Cirrus MaverickCrunch context switching and handling
@@ -6,16 +7,13 @@
  *
  * Shamelessly stolen from the iWMMXt code by Nicolas Pitre, which is
  * Copyright (c) 2003-2004, MontaVista Software, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/linkage.h>
 #include <asm/ptrace.h>
 #include <asm/thread_info.h>
 #include <asm/asm-offsets.h>
+#include <asm/assembler.h>
 #include <mach/ep93xx-regs.h>
 
 /*
@@ -65,11 +63,13 @@
  * called from prefetch exception handler with interrupts enabled
  */
 ENTRY(crunch_task_enable)
+	inc_preempt_count r10, r3
+
 	ldr	r8, =(EP93XX_APB_VIRT_BASE + 0x00130000)	@ syscon addr
 
 	ldr	r1, [r8, #0x80]
 	tst	r1, #0x00800000			@ access to crunch enabled?
-	movne	pc, lr				@ if so no business here
+	bne	2f				@ if so no business here
 	mov	r3, #0xaa			@ unlock syscon swlock
 	str	r3, [r8, #0xc0]
 	orr	r1, r1, #0x00800000		@ enable access to crunch
@@ -142,7 +142,7 @@ crunch_save:
 
 	teq		r0, #0				@ anything to load?
 	cfldr64eq	mvdx0, [r1, #CRUNCH_MVDX0]	@ mvdx0 was clobbered
-	moveq		pc, lr
+	beq		1f
 
 crunch_load:
 	cfldr64		mvdx0, [r0, #CRUNCH_DSPSC]	@ load status word
@@ -190,7 +190,12 @@ crunch_load:
 	cfldr64		mvdx14, [r0, #CRUNCH_MVDX14]
 	cfldr64		mvdx15, [r0, #CRUNCH_MVDX15]
 
-	mov	pc, lr
+1:
+#ifdef CONFIG_PREEMPT_COUNT
+	get_thread_info r10
+#endif
+2:	dec_preempt_count r10, r3
+	ret	lr
 
 /*
  * Back up crunch regs to save area and disable access to them
@@ -269,7 +274,7 @@ ENTRY(crunch_task_copy)
 	mov	r3, lr				@ preserve return address
 	bl	crunch_save
 	msr	cpsr_c, ip			@ restore interrupt mode
-	mov	pc, r3
+	ret	r3
 
 /*
  * Restore crunch state from given memory address
@@ -302,4 +307,4 @@ ENTRY(crunch_task_restore)
 	mov	r3, lr				@ preserve return address
 	bl	crunch_load
 	msr	cpsr_c, ip			@ restore interrupt mode
-	mov	pc, r3
+	ret	r3

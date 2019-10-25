@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * apei-base.c - ACPI Platform Error Interface (APEI) supporting
  * infrastructure
@@ -15,32 +16,19 @@
  *
  * Copyright (C) 2009, Intel Corp.
  *	Author: Huang Ying <ying.huang@intel.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/acpi.h>
-#include <linux/acpi_io.h>
 #include <linux/slab.h>
 #include <linux/io.h>
 #include <linux/kref.h>
 #include <linux/rculist.h>
 #include <linux/interrupt.h>
 #include <linux/debugfs.h>
+#include <asm/unaligned.h>
 
 #include "apei-internal.h"
 
@@ -449,7 +437,7 @@ int apei_resources_sub(struct apei_resources *resources1,
 }
 EXPORT_SYMBOL_GPL(apei_resources_sub);
 
-static int apei_get_nvs_callback(__u64 start, __u64 size, void *data)
+static int apei_get_res_callback(__u64 start, __u64 size, void *data)
 {
 	struct apei_resources *resources = data;
 	return apei_res_add(&resources->iomem, start, size);
@@ -457,7 +445,15 @@ static int apei_get_nvs_callback(__u64 start, __u64 size, void *data)
 
 static int apei_get_nvs_resources(struct apei_resources *resources)
 {
-	return acpi_nvs_for_each_region(apei_get_nvs_callback, resources);
+	return acpi_nvs_for_each_region(apei_get_res_callback, resources);
+}
+
+int (*arch_apei_filter_addr)(int (*func)(__u64 start, __u64 size,
+				     void *data), void *data);
+static int apei_get_arch_resources(struct apei_resources *resources)
+
+{
+	return arch_apei_filter_addr(apei_get_res_callback, resources);
 }
 
 /*
@@ -470,7 +466,7 @@ int apei_resources_request(struct apei_resources *resources,
 {
 	struct apei_res *res, *res_bak = NULL;
 	struct resource *r;
-	struct apei_resources nvs_resources;
+	struct apei_resources nvs_resources, arch_res;
 	int rc;
 
 	rc = apei_resources_sub(resources, &apei_resources_all);
@@ -485,10 +481,20 @@ int apei_resources_request(struct apei_resources *resources,
 	apei_resources_init(&nvs_resources);
 	rc = apei_get_nvs_resources(&nvs_resources);
 	if (rc)
-		goto res_fini;
+		goto nvs_res_fini;
 	rc = apei_resources_sub(resources, &nvs_resources);
 	if (rc)
-		goto res_fini;
+		goto nvs_res_fini;
+
+	if (arch_apei_filter_addr) {
+		apei_resources_init(&arch_res);
+		rc = apei_get_arch_resources(&arch_res);
+		if (rc)
+			goto arch_res_fini;
+		rc = apei_resources_sub(resources, &arch_res);
+		if (rc)
+			goto arch_res_fini;
+	}
 
 	rc = -EINVAL;
 	list_for_each_entry(res, &resources->iomem, list) {
@@ -522,7 +528,8 @@ int apei_resources_request(struct apei_resources *resources,
 		goto err_unmap_ioport;
 	}
 
-	return 0;
+	goto arch_res_fini;
+
 err_unmap_ioport:
 	list_for_each_entry(res, &resources->ioport, list) {
 		if (res == res_bak)
@@ -536,7 +543,10 @@ err_unmap_iomem:
 			break;
 		release_mem_region(res->start, res->end - res->start);
 	}
-res_fini:
+arch_res_fini:
+	if (arch_apei_filter_addr)
+		apei_resources_fini(&arch_res);
+nvs_res_fini:
 	apei_resources_fini(&nvs_resources);
 	return rc;
 }
@@ -567,8 +577,7 @@ static int apei_check_gar(struct acpi_generic_address *reg, u64 *paddr,
 	bit_offset = reg->bit_offset;
 	access_size_code = reg->access_width;
 	space_id = reg->space_id;
-	/* Handle possible alignment issues */
-	memcpy(paddr, &reg->address, sizeof(*paddr));
+	*paddr = get_unaligned(&reg->address);
 	if (!*paddr) {
 		pr_warning(FW_BUG APEI_PFX
 			   "Invalid physical address in GAR [0x%llx/%u/%u/%u/%u]\n",
@@ -590,6 +599,9 @@ static int apei_check_gar(struct acpi_generic_address *reg, u64 *paddr,
 	if (bit_width == 32 && bit_offset == 0 && (*paddr & 0x03) == 0 &&
 	    *access_bit_width < 32)
 		*access_bit_width = 32;
+	else if (bit_width == 64 && bit_offset == 0 && (*paddr & 0x07) == 0 &&
+	    *access_bit_width < 64)
+		*access_bit_width = 64;
 
 	if ((bit_width + bit_offset) > *access_bit_width) {
 		pr_warning(FW_BUG APEI_PFX
@@ -743,6 +755,19 @@ struct dentry *apei_get_debugfs_dir(void)
 }
 EXPORT_SYMBOL_GPL(apei_get_debugfs_dir);
 
+int __weak arch_apei_enable_cmcff(struct acpi_hest_header *hest_hdr,
+				  void *data)
+{
+	return 1;
+}
+EXPORT_SYMBOL_GPL(arch_apei_enable_cmcff);
+
+void __weak arch_apei_report_mem_error(int sev,
+				       struct cper_sec_mem_err *mem_err)
+{
+}
+EXPORT_SYMBOL_GPL(arch_apei_report_mem_error);
+
 int apei_osc_setup(void)
 {
 	static u8 whea_uuid_str[] = "ed855e0c-6c90-47bf-a62a-26de0fc5ad5c";
@@ -755,9 +780,9 @@ int apei_osc_setup(void)
 		.cap.pointer	= capbuf,
 	};
 
-	capbuf[OSC_QUERY_TYPE] = OSC_QUERY_ENABLE;
-	capbuf[OSC_SUPPORT_TYPE] = 1;
-	capbuf[OSC_CONTROL_TYPE] = 0;
+	capbuf[OSC_QUERY_DWORD] = OSC_QUERY_ENABLE;
+	capbuf[OSC_SUPPORT_DWORD] = 1;
+	capbuf[OSC_CONTROL_DWORD] = 0;
 
 	if (ACPI_FAILURE(acpi_get_handle(NULL, "\\_SB", &handle))
 	    || ACPI_FAILURE(acpi_run_osc(handle, &context)))

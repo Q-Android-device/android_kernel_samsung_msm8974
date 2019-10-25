@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * AD714X CapTouch Programmable Controller driver (I2C bus)
  *
  * Copyright 2009-2011 Analog Devices Inc.
- *
- * Licensed under the GPL-2 or later.
  */
 
 #include <linux/input.h>	/* BUS_I2C */
@@ -13,17 +12,15 @@
 #include <linux/pm.h>
 #include "ad714x.h"
 
-#ifdef CONFIG_PM
-static int ad714x_i2c_suspend(struct device *dev)
+static int __maybe_unused ad714x_i2c_suspend(struct device *dev)
 {
 	return ad714x_disable(i2c_get_clientdata(to_i2c_client(dev)));
 }
 
-static int ad714x_i2c_resume(struct device *dev)
+static int __maybe_unused ad714x_i2c_resume(struct device *dev)
 {
 	return ad714x_enable(i2c_get_clientdata(to_i2c_client(dev)));
 }
-#endif
 
 static SIMPLE_DEV_PM_OPS(ad714x_i2c_pm, ad714x_i2c_suspend, ad714x_i2c_resume);
 
@@ -72,7 +69,7 @@ static int ad714x_i2c_read(struct ad714x_chip *chip,
 	return 0;
 }
 
-static int __devinit ad714x_i2c_probe(struct i2c_client *client,
+static int ad714x_i2c_probe(struct i2c_client *client,
 					const struct i2c_device_id *id)
 {
 	struct ad714x_chip *chip;
@@ -83,15 +80,6 @@ static int __devinit ad714x_i2c_probe(struct i2c_client *client,
 		return PTR_ERR(chip);
 
 	i2c_set_clientdata(client, chip);
-
-	return 0;
-}
-
-static int __devexit ad714x_i2c_remove(struct i2c_client *client)
-{
-	struct ad714x_chip *chip = i2c_get_clientdata(client);
-
-	ad714x_remove(chip);
 
 	return 0;
 }
@@ -112,7 +100,6 @@ static struct i2c_driver ad714x_i2c_driver = {
 		.pm   = &ad714x_i2c_pm,
 	},
 	.probe    = ad714x_i2c_probe,
-	.remove   = __devexit_p(ad714x_i2c_remove),
 	.id_table = ad714x_id,
 };
 

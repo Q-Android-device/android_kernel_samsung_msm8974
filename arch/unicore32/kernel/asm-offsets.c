@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/arch/unicore32/kernel/asm-offsets.c
  *
@@ -8,10 +9,6 @@
  * Generate definitions needed by assembly language modules.
  * This code generates raw asm output which is post-processed to extract
  * and format the required data.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/sched.h>
 #include <linux/mm.h>
@@ -42,7 +39,6 @@ int main(void)
 	DEFINE(TI_PREEMPT,	offsetof(struct thread_info, preempt_count));
 	DEFINE(TI_ADDR_LIMIT,	offsetof(struct thread_info, addr_limit));
 	DEFINE(TI_TASK,		offsetof(struct thread_info, task));
-	DEFINE(TI_EXEC_DOMAIN,	offsetof(struct thread_info, exec_domain));
 	DEFINE(TI_CPU,		offsetof(struct thread_info, cpu));
 	DEFINE(TI_CPU_SAVE,	offsetof(struct thread_info, cpu_context));
 	DEFINE(TI_USED_CP,	offsetof(struct thread_info, used_cp));

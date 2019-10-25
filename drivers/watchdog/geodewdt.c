@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Watchdog timer for machines with the CS5535/CS5536 companion chip
  *
  * Copyright (C) 2006-2007, Advanced Micro Devices, Inc.
  * Copyright (C) 2009  Andres Salomon <dilinger@collabora.co.uk>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -92,7 +88,7 @@ static int geodewdt_open(struct inode *inode, struct file *file)
 		__module_get(THIS_MODULE);
 
 	geodewdt_ping();
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 static int geodewdt_release(struct inode *inode, struct file *file)
@@ -215,7 +211,7 @@ static struct miscdevice geodewdt_miscdev = {
 	.fops = &geodewdt_fops,
 };
 
-static int __devinit geodewdt_probe(struct platform_device *dev)
+static int __init geodewdt_probe(struct platform_device *dev)
 {
 	int ret;
 
@@ -243,7 +239,7 @@ static int __devinit geodewdt_probe(struct platform_device *dev)
 	return ret;
 }
 
-static int __devexit geodewdt_remove(struct platform_device *dev)
+static int geodewdt_remove(struct platform_device *dev)
 {
 	misc_deregister(&geodewdt_miscdev);
 	return 0;
@@ -255,11 +251,9 @@ static void geodewdt_shutdown(struct platform_device *dev)
 }
 
 static struct platform_driver geodewdt_driver = {
-	.probe		= geodewdt_probe,
-	.remove		= __devexit_p(geodewdt_remove),
+	.remove		= geodewdt_remove,
 	.shutdown	= geodewdt_shutdown,
 	.driver		= {
-		.owner	= THIS_MODULE,
 		.name	= DRV_NAME,
 	},
 };
@@ -268,20 +262,18 @@ static int __init geodewdt_init(void)
 {
 	int ret;
 
-	ret = platform_driver_register(&geodewdt_driver);
-	if (ret)
-		return ret;
-
 	geodewdt_platform_device = platform_device_register_simple(DRV_NAME,
 								-1, NULL, 0);
-	if (IS_ERR(geodewdt_platform_device)) {
-		ret = PTR_ERR(geodewdt_platform_device);
+	if (IS_ERR(geodewdt_platform_device))
+		return PTR_ERR(geodewdt_platform_device);
+
+	ret = platform_driver_probe(&geodewdt_driver, geodewdt_probe);
+	if (ret)
 		goto err;
-	}
 
 	return 0;
 err:
-	platform_driver_unregister(&geodewdt_driver);
+	platform_device_unregister(geodewdt_platform_device);
 	return ret;
 }
 
@@ -297,4 +289,3 @@ module_exit(geodewdt_exit);
 MODULE_AUTHOR("Advanced Micro Devices, Inc");
 MODULE_DESCRIPTION("Geode GX/LX Watchdog Driver");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);

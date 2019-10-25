@@ -67,7 +67,7 @@ static DEFINE_SPINLOCK(sbwd_lock);
  *
  * wdog is the iomem address of the cfg register
  */
-void sbwdog_set(char __iomem *wdog, unsigned long t)
+static void sbwdog_set(char __iomem *wdog, unsigned long t)
 {
 	spin_lock(&sbwd_lock);
 	__raw_writeb(0, wdog);
@@ -81,7 +81,7 @@ void sbwdog_set(char __iomem *wdog, unsigned long t)
  *
  * wdog is the iomem address of the cfg register
  */
-void sbwdog_pet(char __iomem *wdog)
+static void sbwdog_pet(char __iomem *wdog)
 {
 	spin_lock(&sbwd_lock);
 	__raw_writeb(__raw_readb(wdog) | 1, wdog);
@@ -105,7 +105,7 @@ static const struct watchdog_info ident = {
  */
 static int sbwdog_open(struct inode *inode, struct file *file)
 {
-	nonseekable_open(inode, file);
+	stream_open(inode, file);
 	if (test_and_set_bit(0, &sbwdog_gate))
 		return -EBUSY;
 	__module_get(THIS_MODULE);
@@ -208,7 +208,7 @@ static long sbwdog_ioctl(struct file *file, unsigned int cmd,
 		 * get the remaining count from the ... count register
 		 * which is 1*8 before the config register
 		 */
-		ret = put_user(__raw_readq(user_dog - 8) / 1000000, p);
+		ret = put_user((u32)__raw_readq(user_dog - 8) / 1000000, p);
 		break;
 	}
 	return ret;
@@ -341,7 +341,6 @@ MODULE_PARM_DESC(timeout,
       "Watchdog timeout in microseconds (max/default 8388607 or 8.3ish secs)");
 
 MODULE_LICENSE("GPL");
-MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);
 
 /*
  * example code that can be put in a platform code area to utilize the

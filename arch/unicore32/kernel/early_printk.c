@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/arch/unicore32/kernel/early_printk.c
  *
  * Code specific to PKUnity SoC and UniCore ISA
  *
  * Copyright (C) 2001-2010 GUAN Xue-tao
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/console.h>
 #include <linux/init.h>
@@ -33,23 +30,13 @@ static struct console early_ocd_console = {
 	.index =	-1,
 };
 
-/* Direct interface for emergencies */
-static struct console *early_console = &early_ocd_console;
-
-static int __initdata keep_early;
-
 static int __init setup_early_printk(char *buf)
 {
-	if (!buf)
+	if (!buf || early_console)
 		return 0;
 
+	early_console = &early_ocd_console;
 	if (strstr(buf, "keep"))
-		keep_early = 1;
-
-	if (!strncmp(buf, "ocd", 3))
-		early_console = &early_ocd_console;
-
-	if (keep_early)
 		early_console->flags &= ~CON_BOOT;
 	else
 		early_console->flags |= CON_BOOT;

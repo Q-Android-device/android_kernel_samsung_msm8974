@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * arch/arm/mach-iop33x/iq80331.c
  *
@@ -5,11 +6,6 @@
  *
  * Author: Dave Jiang <dave.jiang@intel.com>
  * Copyright (C) 2003 Intel Corp.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
  */
 
 #include <linux/mm.h>
@@ -44,10 +40,6 @@ static void __init iq80331_timer_init(void)
 	else
 		iop_init_time(266000000);
 }
-
-static struct sys_timer iq80331_timer = {
-	.init		= iq80331_timer_init,
-};
 
 
 /*
@@ -84,11 +76,10 @@ iq80331_pci_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
 }
 
 static struct hw_pci iq80331_pci __initdata = {
-	.swizzle	= pci_std_swizzle,
 	.nr_controllers = 1,
+	.ops		= &iop3xx_ops,
 	.setup		= iop3xx_pci_setup,
 	.preinit	= iop3xx_pci_preinit_cond,
-	.scan		= iop3xx_pci_scan_bus,
 	.map_irq	= iq80331_pci_map_irq,
 };
 
@@ -127,8 +118,15 @@ static struct platform_device iq80331_flash_device = {
 	.resource	= &iq80331_flash_resource,
 };
 
+static struct resource iq80331_gpio_res[] = {
+	DEFINE_RES_MEM((IOP3XX_PERIPHERAL_PHYS_BASE + 0x1780), 0x10),
+};
+
 static void __init iq80331_init_machine(void)
 {
+	platform_device_register_simple("gpio-iop", 0,
+					iq80331_gpio_res,
+					ARRAY_SIZE(iq80331_gpio_res));
 	platform_device_register(&iop3xx_i2c0_device);
 	platform_device_register(&iop3xx_i2c1_device);
 	platform_device_register(&iop33x_uart0_device);
@@ -144,7 +142,7 @@ MACHINE_START(IQ80331, "Intel IQ80331")
 	.atag_offset	= 0x100,
 	.map_io		= iop3xx_map_io,
 	.init_irq	= iop33x_init_irq,
-	.timer		= &iq80331_timer,
+	.init_time	= iq80331_timer_init,
 	.init_machine	= iq80331_init_machine,
 	.restart	= iop3xx_restart,
 MACHINE_END

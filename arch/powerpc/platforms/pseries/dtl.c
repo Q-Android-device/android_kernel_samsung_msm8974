@@ -1,36 +1,21 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Virtual Processor Dispatch Trace Log
  *
  * (C) Copyright IBM Corporation 2009
  *
  * Author: Jeremy Kerr <jk@ozlabs.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2, or (at your option)
- * any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#include <linux/init.h>
 #include <linux/slab.h>
-#include <linux/debugfs.h>
 #include <linux/spinlock.h>
 #include <asm/smp.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/firmware.h>
 #include <asm/lppaca.h>
-#include <asm/debug.h>
-
-#include "plpar_wrappers.h"
+#include <asm/debugfs.h>
+#include <asm/plpar_wrappers.h>
+#include <asm/machdep.h>
 
 struct dtl {
 	struct dtl_entry	*buf;
@@ -57,7 +42,7 @@ static u8 dtl_event_mask = 0x7;
  */
 static int dtl_buf_entries = N_DISPATCH_LOG;
 
-#ifdef CONFIG_VIRT_CPU_ACCOUNTING
+#ifdef CONFIG_VIRT_CPU_ACCOUNTING_NATIVE
 struct dtl_ring {
 	u64	write_index;
 	struct dtl_entry *write_ptr;
@@ -76,7 +61,7 @@ static atomic_t dtl_count;
  */
 static void consume_dtle(struct dtl_entry *dtle, u64 index)
 {
-	struct dtl_ring *dtlr = &__get_cpu_var(dtl_rings);
+	struct dtl_ring *dtlr = this_cpu_ptr(&dtl_rings);
 	struct dtl_entry *wp = dtlr->write_ptr;
 	struct lppaca *vpa = local_paca->lppaca_ptr;
 
@@ -87,7 +72,7 @@ static void consume_dtle(struct dtl_entry *dtle, u64 index)
 	barrier();
 
 	/* check for hypervisor ring buffer overflow, ignore this entry if so */
-	if (index + N_DISPATCH_LOG < vpa->dtl_idx)
+	if (index + N_DISPATCH_LOG < be64_to_cpu(vpa->dtl_idx))
 		return;
 
 	++wp;
@@ -142,7 +127,7 @@ static u64 dtl_current_index(struct dtl *dtl)
 	return per_cpu(dtl_rings, dtl->cpu).write_index;
 }
 
-#else /* CONFIG_VIRT_CPU_ACCOUNTING */
+#else /* CONFIG_VIRT_CPU_ACCOUNTING_NATIVE */
 
 static int dtl_start(struct dtl *dtl)
 {
@@ -151,7 +136,7 @@ static int dtl_start(struct dtl *dtl)
 
 	/* Register our dtl buffer with the hypervisor. The HV expects the
 	 * buffer size to be passed in the second word of the buffer */
-	((u32 *)dtl->buf)[1] = DISPATCH_LOG_BYTES;
+	((u32 *)dtl->buf)[1] = cpu_to_be32(DISPATCH_LOG_BYTES);
 
 	hwcpu = get_hard_smp_processor_id(dtl->cpu);
 	addr = __pa(dtl->buf);
@@ -186,9 +171,9 @@ static void dtl_stop(struct dtl *dtl)
 
 static u64 dtl_current_index(struct dtl *dtl)
 {
-	return lppaca_of(dtl->cpu).dtl_idx;
+	return be64_to_cpu(lppaca_of(dtl->cpu).dtl_idx);
 }
-#endif /* CONFIG_VIRT_CPU_ACCOUNTING */
+#endif /* CONFIG_VIRT_CPU_ACCOUNTING_NATIVE */
 
 static int dtl_enable(struct dtl *dtl)
 {
@@ -393,4 +378,4 @@ err_remove_dir:
 err:
 	return rc;
 }
-arch_initcall(dtl_init);
+machine_arch_initcall(pseries, dtl_init);

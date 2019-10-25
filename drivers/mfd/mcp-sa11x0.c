@@ -1,18 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/drivers/mfd/mcp-sa11x0.c
  *
  *  Copyright (C) 2001-2005 Russell King
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License.
  *
  *  SA11x0 MCP (Multimedia Communications Port) driver.
  *
  *  MCP read/write timeouts from Jordi Colomer, rehacked by rmk.
  */
 #include <linux/module.h>
-#include <linux/init.h>
 #include <linux/io.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
@@ -24,7 +20,7 @@
 
 #include <mach/hardware.h>
 #include <asm/mach-types.h>
-#include <mach/mcp.h>
+#include <linux/platform_data/mfd-mcp-sa11x0.h>
 
 #define DRIVER_NAME "sa11x0-mcp"
 
@@ -156,7 +152,7 @@ static struct mcp_ops mcp_sa11x0 = {
 
 static int mcp_sa11x0_probe(struct platform_device *dev)
 {
-	struct mcp_plat_data *data = dev->dev.platform_data;
+	struct mcp_plat_data *data = dev_get_platdata(&dev->dev);
 	struct resource *mem0, *mem1;
 	struct mcp_sa11x0 *m;
 	struct mcp *mcp;
@@ -225,8 +221,6 @@ static int mcp_sa11x0_probe(struct platform_device *dev)
 	if (ret == 0)
 		return 0;
 
-	platform_set_drvdata(dev, NULL);
-
  err_ioremap:
 	iounmap(m->base1);
 	iounmap(m->base0);
@@ -252,7 +246,6 @@ static int mcp_sa11x0_remove(struct platform_device *dev)
 	mem0 = platform_get_resource(dev, IORESOURCE_MEM, 0);
 	mem1 = platform_get_resource(dev, IORESOURCE_MEM, 1);
 
-	platform_set_drvdata(dev, NULL);
 	mcp_host_del(mcp);
 	iounmap(m->base1);
 	iounmap(m->base0);
@@ -303,7 +296,6 @@ static struct platform_driver mcp_sa11x0_driver = {
 	.remove		= mcp_sa11x0_remove,
 	.driver		= {
 		.name	= DRIVER_NAME,
-		.owner	= THIS_MODULE,
 		.pm	= &mcp_sa11x0_pm_ops,
 	},
 };

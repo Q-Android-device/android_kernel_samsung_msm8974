@@ -1,24 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * RDC321x watchdog driver
  *
  * Copyright (C) 2007-2010 Florian Fainelli <florian@openwrt.org>
  *
  * This driver is highly inspired from the cpu5_wdt driver
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
- *
  */
 
 #include <linux/module.h>
@@ -27,7 +13,6 @@
 #include <linux/errno.h>
 #include <linux/miscdevice.h>
 #include <linux/fs.h>
-#include <linux/init.h>
 #include <linux/ioport.h>
 #include <linux/timer.h>
 #include <linux/completion.h>
@@ -68,7 +53,7 @@ static struct {
 
 /* generic helper functions */
 
-static void rdc321x_wdt_trigger(unsigned long unused)
+static void rdc321x_wdt_trigger(struct timer_list *unused)
 {
 	unsigned long flags;
 	u32 val;
@@ -143,7 +128,7 @@ static int rdc321x_wdt_open(struct inode *inode, struct file *file)
 	if (test_and_set_bit(0, &rdc321x_wdt_device.inuse))
 		return -EBUSY;
 
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 static int rdc321x_wdt_release(struct inode *inode, struct file *file)
@@ -225,13 +210,13 @@ static struct miscdevice rdc321x_wdt_misc = {
 	.fops	= &rdc321x_wdt_fops,
 };
 
-static int __devinit rdc321x_wdt_probe(struct platform_device *pdev)
+static int rdc321x_wdt_probe(struct platform_device *pdev)
 {
 	int err;
 	struct resource *r;
 	struct rdc321x_wdt_pdata *pdata;
 
-	pdata = pdev->dev.platform_data;
+	pdata = dev_get_platdata(&pdev->dev);
 	if (!pdata) {
 		dev_err(&pdev->dev, "no platform data supplied\n");
 		return -ENODEV;
@@ -263,7 +248,7 @@ static int __devinit rdc321x_wdt_probe(struct platform_device *pdev)
 
 	clear_bit(0, &rdc321x_wdt_device.inuse);
 
-	setup_timer(&rdc321x_wdt_device.timer, rdc321x_wdt_trigger, 0);
+	timer_setup(&rdc321x_wdt_device.timer, rdc321x_wdt_trigger, 0);
 
 	rdc321x_wdt_device.default_ticks = ticks;
 
@@ -272,7 +257,7 @@ static int __devinit rdc321x_wdt_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int __devexit rdc321x_wdt_remove(struct platform_device *pdev)
+static int rdc321x_wdt_remove(struct platform_device *pdev)
 {
 	if (rdc321x_wdt_device.queue) {
 		rdc321x_wdt_device.queue = 0;
@@ -286,9 +271,8 @@ static int __devexit rdc321x_wdt_remove(struct platform_device *pdev)
 
 static struct platform_driver rdc321x_wdt_driver = {
 	.probe = rdc321x_wdt_probe,
-	.remove = __devexit_p(rdc321x_wdt_remove),
+	.remove = rdc321x_wdt_remove,
 	.driver = {
-		.owner = THIS_MODULE,
 		.name = "rdc321x-wdt",
 	},
 };
@@ -298,4 +282,3 @@ module_platform_driver(rdc321x_wdt_driver);
 MODULE_AUTHOR("Florian Fainelli <florian@openwrt.org>");
 MODULE_DESCRIPTION("RDC321x watchdog driver");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);

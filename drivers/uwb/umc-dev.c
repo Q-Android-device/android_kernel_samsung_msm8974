@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * UWB Multi-interface Controller device management.
  *
  * Copyright (C) 2007 Cambridge Silicon Radio Ltd.
- *
- * This file is released under the GNU GPL v2.
  */
 #include <linux/kernel.h>
 #include <linux/export.h>
@@ -66,6 +65,7 @@ int umc_device_register(struct umc_dev *umc)
 	return 0;
 
 error_device_register:
+	put_device(&umc->dev);
 	release_resource(&umc->resource);
 error_request_resource:
 	return err;

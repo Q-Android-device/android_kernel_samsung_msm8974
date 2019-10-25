@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * e740-wm9705.c  --  SoC audio for e740
  *
  * Copyright 2007 (c) Ian Molton <spyro@f2s.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation; version 2 ONLY.
- *
  */
 
 #include <linux/module.h>
@@ -21,10 +17,6 @@
 #include <mach/eseries-gpio.h>
 
 #include <asm/mach-types.h>
-
-#include "../codecs/wm9705.h"
-#include "pxa2xx-ac97.h"
-
 
 #define E740_AUDIO_OUT 1
 #define E740_AUDIO_IN  2
@@ -88,29 +80,6 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"Mic Amp", NULL, "Mic (Internal)"},
 };
 
-static int e740_ac97_init(struct snd_soc_pcm_runtime *rtd)
-{
-	struct snd_soc_codec *codec = rtd->codec;
-	struct snd_soc_dapm_context *dapm = &codec->dapm;
-
-	snd_soc_dapm_nc_pin(dapm, "HPOUTL");
-	snd_soc_dapm_nc_pin(dapm, "HPOUTR");
-	snd_soc_dapm_nc_pin(dapm, "PHONE");
-	snd_soc_dapm_nc_pin(dapm, "LINEINL");
-	snd_soc_dapm_nc_pin(dapm, "LINEINR");
-	snd_soc_dapm_nc_pin(dapm, "CDINL");
-	snd_soc_dapm_nc_pin(dapm, "CDINR");
-	snd_soc_dapm_nc_pin(dapm, "PCBEEP");
-	snd_soc_dapm_nc_pin(dapm, "MIC2");
-
-	snd_soc_dapm_new_controls(dapm, e740_dapm_widgets,
-					ARRAY_SIZE(e740_dapm_widgets));
-
-	snd_soc_dapm_add_routes(dapm, audio_map, ARRAY_SIZE(audio_map));
-
-	return 0;
-}
-
 static struct snd_soc_dai_link e740_dai[] = {
 	{
 		.name = "AC97",
@@ -119,7 +88,6 @@ static struct snd_soc_dai_link e740_dai[] = {
 		.codec_dai_name = "wm9705-hifi",
 		.platform_name = "pxa-pcm-audio",
 		.codec_name = "wm9705-codec",
-		.init = e740_ac97_init,
 	},
 	{
 		.name = "AC97 Aux",
@@ -136,6 +104,12 @@ static struct snd_soc_card e740 = {
 	.owner = THIS_MODULE,
 	.dai_link = e740_dai,
 	.num_links = ARRAY_SIZE(e740_dai),
+
+	.dapm_widgets = e740_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(e740_dapm_widgets),
+	.dapm_routes = audio_map,
+	.num_dapm_routes = ARRAY_SIZE(audio_map),
+	.fully_routed = true,
 };
 
 static struct gpio e740_audio_gpios[] = {
@@ -144,7 +118,7 @@ static struct gpio e740_audio_gpios[] = {
 	{ GPIO_E740_WM9705_nAVDD2, GPIOF_OUT_INIT_HIGH, "Audio power" },
 };
 
-static int __devinit e740_probe(struct platform_device *pdev)
+static int e740_probe(struct platform_device *pdev)
 {
 	struct snd_soc_card *card = &e740;
 	int ret;
@@ -156,7 +130,7 @@ static int __devinit e740_probe(struct platform_device *pdev)
 
 	card->dev = &pdev->dev;
 
-	ret = snd_soc_register_card(card);
+	ret = devm_snd_soc_register_card(&pdev->dev, card);
 	if (ret) {
 		dev_err(&pdev->dev, "snd_soc_register_card() failed: %d\n",
 			ret);
@@ -165,22 +139,19 @@ static int __devinit e740_probe(struct platform_device *pdev)
 	return ret;
 }
 
-static int __devexit e740_remove(struct platform_device *pdev)
+static int e740_remove(struct platform_device *pdev)
 {
-	struct snd_soc_card *card = platform_get_drvdata(pdev);
-
 	gpio_free_array(e740_audio_gpios, ARRAY_SIZE(e740_audio_gpios));
-	snd_soc_unregister_card(card);
 	return 0;
 }
 
 static struct platform_driver e740_driver = {
 	.driver		= {
 		.name	= "e740-audio",
-		.owner	= THIS_MODULE,
+		.pm     = &snd_soc_pm_ops,
 	},
 	.probe		= e740_probe,
-	.remove		= __devexit_p(e740_remove),
+	.remove		= e740_remove,
 };
 
 module_platform_driver(e740_driver);

@@ -1,15 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * include/linux/mfd/wm831x/pdata.h -- Platform data for WM831x
  *
  * Copyright 2009 Wolfson Microelectronics PLC.
  *
  * Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- *
  */
 
 #ifndef __MFD_WM831X_PDATA_H__
@@ -26,7 +21,7 @@ struct wm831x_backlight_pdata {
 struct wm831x_backup_pdata {
 	int charger_enable;
 	int no_constant_voltage;  /** Disable constant voltage charging */
-	int vlim;   /** Voltage limit in milivolts */
+	int vlim;   /** Voltage limit in millivolts */
 	int ilim;   /** Current limit in microamps */
 };
 

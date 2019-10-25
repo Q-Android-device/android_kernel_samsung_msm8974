@@ -1,9 +1,10 @@
-	.section .text..page_aligned
+/* SPDX-License-Identifier: GPL-2.0-only */
+	.text
 #include <linux/linkage.h>
 #include <asm/segment.h>
 #include <asm/page_types.h>
 
-# Copyright 2003, 2008 Pavel Machek <pavel@suse.cz>, distribute under GPLv2
+# Copyright 2003, 2008 Pavel Machek <pavel@suse.cz
 
 	.code32
 	ALIGN
@@ -12,13 +13,14 @@ ENTRY(wakeup_pmode_return)
 wakeup_pmode_return:
 	movw	$__KERNEL_DS, %ax
 	movw	%ax, %ss
-	movw	%ax, %ds
-	movw	%ax, %es
 	movw	%ax, %fs
 	movw	%ax, %gs
 
+	movw	$__USER_DS, %ax
+	movw	%ax, %ds
+	movw	%ax, %es
+
 	# reload the gdt, as we need the full 32 bit address
-	lgdt	saved_gdt
 	lidt	saved_idt
 	lldt	saved_ldt
 	ljmp	$(__KERNEL_CS), $1f
@@ -44,7 +46,6 @@ bogus_magic:
 
 
 save_registers:
-	sgdt	saved_gdt
 	sidt	saved_idt
 	sldt	saved_ldt
 	str	saved_tss
@@ -74,7 +75,9 @@ restore_registers:
 ENTRY(do_suspend_lowlevel)
 	call	save_processor_state
 	call	save_registers
-	call	acpi_enter_s3
+	pushl	$3
+	call	x86_acpi_enter_sleep_state
+	addl	$4, %esp
 
 #	In case of S3 failure, we'll emerge here.  Jump
 # 	to ret_point to recover
@@ -88,10 +91,9 @@ ret_point:
 .data
 ALIGN
 ENTRY(saved_magic)	.long	0
-ENTRY(saved_eip)	.long	0
+saved_eip:		.long 0
 
 # saved registers
-saved_gdt:	.long	0,0
 saved_idt:	.long	0,0
 saved_ldt:	.long	0
 saved_tss:	.long	0

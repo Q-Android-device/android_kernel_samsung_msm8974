@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
 
  * l1oip.c  low level driver for tunneling layer 1 over IP
@@ -5,21 +6,6 @@
  * NOTE: It is not compatible with TDMoIP nor "ISDN over IP".
  *
  * Author	Andreas Eversberg (jolly@eversberg.eu)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2, or (at your option)
- * any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
- *
  */
 
 /* module parameters:
@@ -234,6 +220,8 @@
 #include <linux/workqueue.h>
 #include <linux/kthread.h>
 #include <linux/slab.h>
+#include <linux/sched/signal.h>
+
 #include <net/sock.h>
 #include "core.h"
 #include "l1oip.h"
@@ -277,8 +265,7 @@ l1oip_socket_send(struct l1oip *hc, u8 localcodec, u8 channel, u32 chanmask,
 		  u16 timebase, u8 *buf, int len)
 {
 	u8 *p;
-	int multi = 0;
-	u8 frame[len + 32];
+	u8 frame[MAX_DFRAME_LEN_L1 + 32];
 	struct socket *socket = NULL;
 
 	if (debug & DEBUG_L1OIP_MSG)
@@ -288,11 +275,9 @@ l1oip_socket_send(struct l1oip *hc, u8 localcodec, u8 channel, u32 chanmask,
 	p = frame;
 
 	/* restart timer */
-	if ((int)(hc->keep_tl.expires-jiffies) < 5 * HZ) {
-		del_timer(&hc->keep_tl);
-		hc->keep_tl.expires = jiffies + L1OIP_KEEPALIVE * HZ;
-		add_timer(&hc->keep_tl);
-	} else
+	if (time_before(hc->keep_tl.expires, jiffies + 5 * HZ))
+		mod_timer(&hc->keep_tl, jiffies + L1OIP_KEEPALIVE * HZ);
+	else
 		hc->keep_tl.expires = jiffies + L1OIP_KEEPALIVE * HZ;
 
 	if (debug & DEBUG_L1OIP_MSG)
@@ -317,9 +302,7 @@ l1oip_socket_send(struct l1oip *hc, u8 localcodec, u8 channel, u32 chanmask,
 		*p++ = hc->id >> 8;
 		*p++ = hc->id;
 	}
-	*p++ = (multi == 1) ? 0x80 : 0x00 + channel; /* m-flag, channel */
-	if (multi == 1)
-		*p++ = len; /* length */
+	*p++ =  0x00 + channel; /* m-flag, channel */
 	*p++ = timebase >> 8; /* time base */
 	*p++ = timebase;
 
@@ -443,14 +426,8 @@ l1oip_socket_recv(struct l1oip *hc, u8 remotecodec, u8 channel, u16 timebase,
 
 #ifdef REORDER_DEBUG
 		if (hc->chan[channel].disorder_flag) {
-			struct sk_buff *skb;
-			int cnt;
-			skb = hc->chan[channel].disorder_skb;
-			hc->chan[channel].disorder_skb = nskb;
-			nskb = skb;
-			cnt = hc->chan[channel].disorder_cnt;
-			hc->chan[channel].disorder_cnt = rx_counter;
-			rx_counter = cnt;
+			swap(hc->chan[channel].disorder_skb, nskb);
+			swap(hc->chan[channel].disorder_cnt, rx_counter);
 		}
 		hc->chan[channel].disorder_flag ^= 1;
 		if (nskb)
@@ -624,11 +601,9 @@ multiframe:
 		goto multiframe;
 
 	/* restart timer */
-	if ((int)(hc->timeout_tl.expires-jiffies) < 5 * HZ || !hc->timeout_on) {
+	if (time_before(hc->timeout_tl.expires, jiffies + 5 * HZ) || !hc->timeout_on) {
 		hc->timeout_on = 1;
-		del_timer(&hc->timeout_tl);
-		hc->timeout_tl.expires = jiffies + L1OIP_TIMEOUT * HZ;
-		add_timer(&hc->timeout_tl);
+		mod_timer(&hc->timeout_tl, jiffies + L1OIP_TIMEOUT * HZ);
 	} else /* only adjust timer */
 		hc->timeout_tl.expires = jiffies + L1OIP_TIMEOUT * HZ;
 
@@ -656,8 +631,10 @@ l1oip_socket_thread(void *data)
 {
 	struct l1oip *hc = (struct l1oip *)data;
 	int ret = 0;
-	struct msghdr msg;
 	struct sockaddr_in sin_rx;
+	struct kvec iov;
+	struct msghdr msg = {.msg_name = &sin_rx,
+			     .msg_namelen = sizeof(sin_rx)};
 	unsigned char *recvbuf;
 	size_t recvbuf_size = 1500;
 	int recvlen;
@@ -671,6 +648,9 @@ l1oip_socket_thread(void *data)
 		ret = -ENOMEM;
 		goto fail;
 	}
+
+	iov.iov_base = recvbuf;
+	iov.iov_len = recvbuf_size;
 
 	/* make daemon */
 	allow_signal(SIGTERM);
@@ -692,7 +672,7 @@ l1oip_socket_thread(void *data)
 	hc->sin_remote.sin_addr.s_addr = htonl(hc->remoteip);
 	hc->sin_remote.sin_port = htons((unsigned short)hc->remoteport);
 
-	/* bind to incomming port */
+	/* bind to incoming port */
 	if (socket->ops->bind(socket, (struct sockaddr *)&hc->sin_local,
 			      sizeof(hc->sin_local))) {
 		printk(KERN_ERR "%s: Failed to bind socket to port %d.\n",
@@ -707,12 +687,6 @@ l1oip_socket_thread(void *data)
 		ret = -EIO;
 		goto fail;
 	}
-
-	/* build receive message */
-	msg.msg_name = &sin_rx;
-	msg.msg_namelen = sizeof(sin_rx);
-	msg.msg_control = NULL;
-	msg.msg_controllen = 0;
 
 	/* build send message */
 	hc->sendmsg.msg_name = &hc->sin_remote;
@@ -730,12 +704,8 @@ l1oip_socket_thread(void *data)
 		printk(KERN_DEBUG "%s: socket created and open\n",
 		       __func__);
 	while (!signal_pending(current)) {
-		struct kvec iov = {
-			.iov_base = recvbuf,
-			.iov_len = recvbuf_size,
-		};
-		recvlen = kernel_recvmsg(socket, &msg, &iov, 1,
-					 recvbuf_size, 0);
+		iov_iter_kvec(&msg.msg_iter, READ, &iov, 1, recvbuf_size);
+		recvlen = sock_recvmsg(socket, &msg, 0);
 		if (recvlen > 0) {
 			l1oip_socket_parse(hc, &sin_rx, recvbuf, recvlen);
 		} else {
@@ -847,17 +817,18 @@ l1oip_send_bh(struct work_struct *work)
  * timer stuff
  */
 static void
-l1oip_keepalive(void *data)
+l1oip_keepalive(struct timer_list *t)
 {
-	struct l1oip *hc = (struct l1oip *)data;
+	struct l1oip *hc = from_timer(hc, t, keep_tl);
 
 	schedule_work(&hc->workq);
 }
 
 static void
-l1oip_timeout(void *data)
+l1oip_timeout(struct timer_list *t)
 {
-	struct l1oip			*hc = (struct l1oip *)data;
+	struct l1oip			*hc = from_timer(hc, t,
+								  timeout_tl);
 	struct dchannel		*dch = hc->chan[hc->d_idx].dch;
 
 	if (debug & DEBUG_L1OIP_MSG)
@@ -916,7 +887,11 @@ handle_dmsg(struct mISDNchannel *ch, struct sk_buff *skb)
 		p = skb->data;
 		l = skb->len;
 		while (l) {
-			ll = (l < L1OIP_MAX_PERFRAME) ? l : L1OIP_MAX_PERFRAME;
+			/*
+			 * This is technically bounded by L1OIP_MAX_PERFRAME but
+			 * MAX_DFRAME_LEN_L1 < L1OIP_MAX_PERFRAME
+			 */
+			ll = (l < MAX_DFRAME_LEN_L1) ? l : MAX_DFRAME_LEN_L1;
 			l1oip_socket_send(hc, 0, dch->slot, 0,
 					  hc->chan[dch->slot].tx_counter++, p, ll);
 			p += ll;
@@ -1154,7 +1129,11 @@ handle_bmsg(struct mISDNchannel *ch, struct sk_buff *skb)
 		p = skb->data;
 		l = skb->len;
 		while (l) {
-			ll = (l < L1OIP_MAX_PERFRAME) ? l : L1OIP_MAX_PERFRAME;
+			/*
+			 * This is technically bounded by L1OIP_MAX_PERFRAME but
+			 * MAX_DFRAME_LEN_L1 < L1OIP_MAX_PERFRAME
+			 */
+			ll = (l < MAX_DFRAME_LEN_L1) ? l : MAX_DFRAME_LEN_L1;
 			l1oip_socket_send(hc, hc->codec, bch->slot, 0,
 					  hc->chan[bch->slot].tx_counter, p, ll);
 			hc->chan[bch->slot].tx_counter += ll;
@@ -1341,7 +1320,7 @@ init_card(struct l1oip *hc, int pri, int bundle)
 	if (id[l1oip_cnt] == 0) {
 		printk(KERN_WARNING "Warning: No 'id' value given or "
 		       "0, this is highly unsecure. Please use 32 "
-		       "bit randmom number 0x...\n");
+		       "bit random number 0x...\n");
 	}
 	hc->id = id[l1oip_cnt];
 	if (debug & DEBUG_L1OIP_INIT)
@@ -1420,7 +1399,7 @@ init_card(struct l1oip *hc, int pri, int bundle)
 		bch->nr = i + ch;
 		bch->slot = i + ch;
 		bch->debug = debug;
-		mISDN_initbchannel(bch, MAX_DATA_MEM);
+		mISDN_initbchannel(bch, MAX_DATA_MEM, 0);
 		bch->hw = hc;
 		bch->ch.send = handle_bmsg;
 		bch->ch.ctrl = l1oip_bctrl;
@@ -1442,15 +1421,11 @@ init_card(struct l1oip *hc, int pri, int bundle)
 	if (ret)
 		return ret;
 
-	hc->keep_tl.function = (void *)l1oip_keepalive;
-	hc->keep_tl.data = (ulong)hc;
-	init_timer(&hc->keep_tl);
+	timer_setup(&hc->keep_tl, l1oip_keepalive, 0);
 	hc->keep_tl.expires = jiffies + 2 * HZ; /* two seconds first time */
 	add_timer(&hc->keep_tl);
 
-	hc->timeout_tl.function = (void *)l1oip_timeout;
-	hc->timeout_tl.data = (ulong)hc;
-	init_timer(&hc->timeout_tl);
+	timer_setup(&hc->timeout_tl, l1oip_timeout, 0);
 	hc->timeout_on = 0; /* state that we have timer off */
 
 	return 0;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Spin and read/write lock operations.
  *
@@ -5,17 +6,11 @@
  * Copyright (C) 2001 Anton Blanchard <anton@au.ibm.com>, IBM
  * Copyright (C) 2002 Dave Engebretsen <engebret@us.ibm.com>, IBM
  *   Rework to support virtual processors
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #include <linux/kernel.h>
 #include <linux/spinlock.h>
 #include <linux/export.h>
-#include <linux/stringify.h>
 #include <linux/smp.h>
 
 /* waiting for a spinlock... */
@@ -32,7 +27,7 @@ void __spin_yield(arch_spinlock_t *lock)
 		return;
 	holder_cpu = lock_value & 0xffff;
 	BUG_ON(holder_cpu >= NR_CPUS);
-	yield_count = lppaca_of(holder_cpu).yield_count;
+	yield_count = be32_to_cpu(lppaca_of(holder_cpu).yield_count);
 	if ((yield_count & 1) == 0)
 		return;		/* virtual cpu is currently running */
 	rmb();
@@ -41,6 +36,7 @@ void __spin_yield(arch_spinlock_t *lock)
 	plpar_hcall_norets(H_CONFER,
 		get_hard_smp_processor_id(holder_cpu), yield_count);
 }
+EXPORT_SYMBOL_GPL(__spin_yield);
 
 /*
  * Waiting for a read lock or a write lock on a rwlock...
@@ -57,7 +53,7 @@ void __rw_yield(arch_rwlock_t *rw)
 		return;		/* no write lock at present */
 	holder_cpu = lock_value & 0xffff;
 	BUG_ON(holder_cpu >= NR_CPUS);
-	yield_count = lppaca_of(holder_cpu).yield_count;
+	yield_count = be32_to_cpu(lppaca_of(holder_cpu).yield_count);
 	if ((yield_count & 1) == 0)
 		return;		/* virtual cpu is currently running */
 	rmb();
@@ -67,15 +63,3 @@ void __rw_yield(arch_rwlock_t *rw)
 		get_hard_smp_processor_id(holder_cpu), yield_count);
 }
 #endif
-
-void arch_spin_unlock_wait(arch_spinlock_t *lock)
-{
-	while (lock->slock) {
-		HMT_low();
-		if (SHARED_PROCESSOR)
-			__spin_yield(lock);
-	}
-	HMT_medium();
-}
-
-EXPORT_SYMBOL(arch_spin_unlock_wait);

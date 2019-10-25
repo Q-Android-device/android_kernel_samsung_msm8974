@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	X.25 Packet Layer release 002
  *
@@ -7,12 +8,6 @@
  *
  *	This code REQUIRES 2.1.15 or higher
  *
- *	This module:
- *		This module is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
- *
  *	History
  *	X.25 001	Jonathan Naylor	Started coding.
  */
@@ -21,9 +16,7 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <net/x25.h>
-#ifdef KW_TAINT_ANALYSIS
-   extern void * get_tainted_stuff();
-#endif
+
 LIST_HEAD(x25_route_list);
 DEFINE_RWLOCK(x25_route_list_lock);
 
@@ -57,7 +50,7 @@ static int x25_add_route(struct x25_address *address, unsigned int sigdigits,
 
 	rt->sigdigits = sigdigits;
 	rt->dev       = dev;
-	atomic_set(&rt->refcnt, 1);
+	refcount_set(&rt->refcnt, 1);
 
 	list_add(&rt->node, &x25_route_list);
 	rc = 0;
@@ -68,7 +61,7 @@ out:
 
 /**
  * __x25_remove_route - remove route from x25_route_list
- * @rt - route to remove
+ * @rt: route to remove
  *
  * Remove route from x25_route_list. If it was there.
  * Caller must hold x25_route_list_lock.
@@ -181,16 +174,12 @@ struct x25_route *x25_get_route(struct x25_address *addr)
 /*
  *	Handle the ioctls that control the routing functions.
  */
-int x25_route_ioctl(unsigned int cmd, void __user *arg_actual)
+int x25_route_ioctl(unsigned int cmd, void __user *arg)
 {
 	struct x25_route_struct rt;
 	struct net_device *dev;
 	int rc = -EINVAL;
-	#ifdef KW_TAINT_ANALYSIS
-	void __user *arg = (void __user *)get_tainted_stuff();
-	#else
-	void __user *arg = arg_actual;
-	#endif
+
 	if (cmd != SIOCADDRT && cmd != SIOCDELRT)
 		goto out;
 

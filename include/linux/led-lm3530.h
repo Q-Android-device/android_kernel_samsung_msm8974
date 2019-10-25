@@ -1,8 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2011 ST-Ericsson SA.
  * Copyright (C) 2009 Motorola, Inc.
- *
- * License Terms: GNU General Public License v2
  *
  * Simple driver for National Semiconductor LM35330 Backlight driver chip
  *
@@ -92,7 +91,7 @@ struct lm3530_pwm_data {
  * @als2_resistor_sel: internal resistance from ALS2 input to ground
  * @als_vmin: als input voltage calibrated for max brightness in mV
  * @als_vmax: als input voltage calibrated for min brightness in mV
- * @brt_val: brightness value (0-255)
+ * @brt_val: brightness value (0-127)
  * @pwm_data: PWM control functions (only valid when the mode is PWM)
  */
 struct lm3530_platform_data {

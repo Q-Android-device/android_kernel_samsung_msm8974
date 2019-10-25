@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Native support for the Aiptek HyperPen USB Tablets
  *  (4000U/5000U/6000U/8000U/12000U)
@@ -54,37 +55,15 @@
  *      so therefore it's easier to document them all as one subsystem.
  *      Please visit the project's "home page", located at,
  *      http://aiptektablet.sourceforge.net.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 #include <linux/jiffies.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/module.h>
-#include <linux/init.h>
 #include <linux/usb/input.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/unaligned.h>
-
-/*
- * Version Information
- */
-#define DRIVER_VERSION "v2.3 (May 2, 2007)"
-#define DRIVER_AUTHOR  "Bryan W. Headley/Chris Atenasio/Cedric Brun/Rene van Paassen"
-#define DRIVER_DESC    "Aiptek HyperPen USB Tablet Driver (Linux 2.6.x)"
 
 /*
  * Aiptek status packet:
@@ -308,7 +287,7 @@ struct aiptek_settings {
 
 struct aiptek {
 	struct input_dev *inputdev;		/* input device struct           */
-	struct usb_device *usbdev;		/* usb device struct             */
+	struct usb_interface *intf;		/* usb interface struct          */
 	struct urb *urb;			/* urb for incoming reports      */
 	dma_addr_t data_dma;			/* our dma stuffage              */
 	struct aiptek_features features;	/* tablet's array of features    */
@@ -435,6 +414,7 @@ static void aiptek_irq(struct urb *urb)
 	struct aiptek *aiptek = urb->context;
 	unsigned char *data = aiptek->data;
 	struct input_dev *inputdev = aiptek->inputdev;
+	struct usb_interface *intf = aiptek->intf;
 	int jitterable = 0;
 	int retval, macro, x, y, z, left, right, middle, p, dv, tip, bs, pck;
 
@@ -447,13 +427,13 @@ static void aiptek_irq(struct urb *urb)
 	case -ENOENT:
 	case -ESHUTDOWN:
 		/* This urb is terminated, clean up */
-		dbg("%s - urb shutting down with status: %d",
-		    __func__, urb->status);
+		dev_dbg(&intf->dev, "%s - urb shutting down with status: %d\n",
+			__func__, urb->status);
 		return;
 
 	default:
-		dbg("%s - nonzero urb status received: %d",
-		    __func__, urb->status);
+		dev_dbg(&intf->dev, "%s - nonzero urb status received: %d\n",
+			__func__, urb->status);
 		goto exit;
 	}
 
@@ -785,7 +765,7 @@ static void aiptek_irq(struct urb *urb)
 				 1 | AIPTEK_REPORT_TOOL_UNKNOWN);
 		input_sync(inputdev);
 	} else {
-		dbg("Unknown report %d", data[0]);
+		dev_dbg(&intf->dev, "Unknown report %d\n", data[0]);
 	}
 
 	/* Jitter may occur when the user presses a button on the stlyus
@@ -811,8 +791,9 @@ static void aiptek_irq(struct urb *urb)
 exit:
 	retval = usb_submit_urb(urb, GFP_ATOMIC);
 	if (retval != 0) {
-		err("%s - usb_submit_urb failed with result %d",
-		    __func__, retval);
+		dev_err(&intf->dev,
+			"%s - usb_submit_urb failed with result %d\n",
+			__func__, retval);
 	}
 }
 
@@ -845,7 +826,7 @@ static int aiptek_open(struct input_dev *inputdev)
 {
 	struct aiptek *aiptek = input_get_drvdata(inputdev);
 
-	aiptek->urb->dev = aiptek->usbdev;
+	aiptek->urb->dev = interface_to_usbdev(aiptek->intf);
 	if (usb_submit_urb(aiptek->urb, GFP_KERNEL) != 0)
 		return -EIO;
 
@@ -871,8 +852,10 @@ aiptek_set_report(struct aiptek *aiptek,
 		  unsigned char report_type,
 		  unsigned char report_id, void *buffer, int size)
 {
-	return usb_control_msg(aiptek->usbdev,
-			       usb_sndctrlpipe(aiptek->usbdev, 0),
+	struct usb_device *udev = interface_to_usbdev(aiptek->intf);
+
+	return usb_control_msg(udev,
+			       usb_sndctrlpipe(udev, 0),
 			       USB_REQ_SET_REPORT,
 			       USB_TYPE_CLASS | USB_RECIP_INTERFACE |
 			       USB_DIR_OUT, (report_type << 8) + report_id,
@@ -884,8 +867,10 @@ aiptek_get_report(struct aiptek *aiptek,
 		  unsigned char report_type,
 		  unsigned char report_id, void *buffer, int size)
 {
-	return usb_control_msg(aiptek->usbdev,
-			       usb_rcvctrlpipe(aiptek->usbdev, 0),
+	struct usb_device *udev = interface_to_usbdev(aiptek->intf);
+
+	return usb_control_msg(udev,
+			       usb_rcvctrlpipe(udev, 0),
 			       USB_REQ_GET_REPORT,
 			       USB_TYPE_CLASS | USB_RECIP_INTERFACE |
 			       USB_DIR_IN, (report_type << 8) + report_id,
@@ -912,8 +897,9 @@ aiptek_command(struct aiptek *aiptek, unsigned char command, unsigned char data)
 
 	if ((ret =
 	     aiptek_set_report(aiptek, 3, 2, buf, sizeof_buf)) != sizeof_buf) {
-		dbg("aiptek_program: failed, tried to send: 0x%02x 0x%02x",
-		    command, data);
+		dev_dbg(&aiptek->intf->dev,
+			"aiptek_program: failed, tried to send: 0x%02x 0x%02x\n",
+			command, data);
 	}
 	kfree(buf);
 	return ret < 0 ? ret : 0;
@@ -947,8 +933,9 @@ aiptek_query(struct aiptek *aiptek, unsigned char command, unsigned char data)
 
 	if ((ret =
 	     aiptek_get_report(aiptek, 3, 2, buf, sizeof_buf)) != sizeof_buf) {
-		dbg("aiptek_query failed: returned 0x%02x 0x%02x 0x%02x",
-		    buf[0], buf[1], buf[2]);
+		dev_dbg(&aiptek->intf->dev,
+			"aiptek_query failed: returned 0x%02x 0x%02x 0x%02x\n",
+			buf[0], buf[1], buf[2]);
 		ret = -EIO;
 	} else {
 		ret = get_unaligned_le16(buf + 1);
@@ -1669,7 +1656,7 @@ static struct attribute *aiptek_attributes[] = {
 	NULL
 };
 
-static struct attribute_group aiptek_attribute_group = {
+static const struct attribute_group aiptek_attribute_group = {
 	.attrs	= aiptek_attributes,
 };
 
@@ -1712,7 +1699,7 @@ aiptek_probe(struct usb_interface *intf, const struct usb_device_id *id)
         }
 
 	aiptek->data = usb_alloc_coherent(usbdev, AIPTEK_PACKET_LENGTH,
-					  GFP_ATOMIC, &aiptek->data_dma);
+					  GFP_KERNEL, &aiptek->data_dma);
         if (!aiptek->data) {
 		dev_warn(&intf->dev, "cannot allocate usb buffer\n");
 		goto fail1;
@@ -1725,7 +1712,7 @@ aiptek_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	}
 
 	aiptek->inputdev = inputdev;
-	aiptek->usbdev = usbdev;
+	aiptek->intf = intf;
 	aiptek->ifnum = intf->altsetting[0].desc.bInterfaceNumber;
 	aiptek->inDelay = 0;
 	aiptek->endDelay = 0;
@@ -1828,8 +1815,8 @@ aiptek_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	 * input.
 	 */
 	usb_fill_int_urb(aiptek->urb,
-			 aiptek->usbdev,
-			 usb_rcvintpipe(aiptek->usbdev,
+			 usbdev,
+			 usb_rcvintpipe(usbdev,
 					endpoint->bEndpointAddress),
 			 aiptek->data, 8, aiptek_irq, aiptek,
 			 endpoint->bInterval);
@@ -1865,7 +1852,7 @@ aiptek_probe(struct usb_interface *intf, const struct usb_device_id *id)
 		dev_info(&intf->dev,
 			 "Aiptek tried all speeds, no sane response\n");
 		err = -EINVAL;
-		goto fail2;
+		goto fail3;
 	}
 
 	/* Associate this driver's struct with the usb interface.
@@ -1934,8 +1921,8 @@ static struct usb_driver aiptek_driver = {
 
 module_usb_driver(aiptek_driver);
 
-MODULE_AUTHOR(DRIVER_AUTHOR);
-MODULE_DESCRIPTION(DRIVER_DESC);
+MODULE_AUTHOR("Bryan W. Headley/Chris Atenasio/Cedric Brun/Rene van Paassen");
+MODULE_DESCRIPTION("Aiptek HyperPen USB Tablet Driver");
 MODULE_LICENSE("GPL");
 
 module_param(programmableDelay, int, 0);

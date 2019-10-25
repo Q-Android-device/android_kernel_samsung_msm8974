@@ -33,9 +33,11 @@ SECTIONS {
 		EXIT_TEXT
 		EXIT_CALL
 		SCHED_TEXT
+		CPUIDLE_TEXT
 		LOCK_TEXT
 		KPROBES_TEXT
 		IRQENTRY_TEXT
+		SOFTIRQENTRY_TEXT
 		. = ALIGN (4) ;
 		_etext = . ;
 	}
@@ -51,6 +53,7 @@ SECTIONS {
 	. = ALIGN(16);
 	RODATA
 	EXCEPTION_TABLE(16)
+	NOTES
 
 	/*
 	 * sdata2 section can go anywhere, but must be word aligned
@@ -114,8 +117,6 @@ SECTIONS {
 		CON_INITCALL
 	}
 
-	SECURITY_INIT
-
 	__init_end_before_initramfs = .;
 
 	.init.ramfs : AT(ADDR(.init.ramfs) - LOAD_OFFSET) {
@@ -131,7 +132,6 @@ SECTIONS {
 			*(COMMON)
 		. = ALIGN (4) ;
 		__bss_stop = . ;
-		_ebss = . ;
 	}
 	. = ALIGN(PAGE_SIZE);
 	_end = .;

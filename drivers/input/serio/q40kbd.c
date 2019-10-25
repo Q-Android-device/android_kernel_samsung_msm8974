@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (c) 2000-2001 Vojtech Pavlik
  *
@@ -10,27 +11,9 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- *
- * Should you need to contact me, the author, you can do so either by
- * e-mail - mail your message to <vojtech@ucw.cz>, or by paper mail:
- * Vojtech Pavlik, Simunkova 1594, Prague 8, 182 00 Czech Republic
  */
 
 #include <linux/module.h>
-#include <linux/init.h>
 #include <linux/serio.h>
 #include <linux/interrupt.h>
 #include <linux/err.h>
@@ -39,7 +22,7 @@
 #include <linux/slab.h>
 
 #include <asm/io.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/q40_master.h>
 #include <asm/irq.h>
 #include <asm/q40ints.h>
@@ -122,7 +105,7 @@ static void q40kbd_close(struct serio *port)
 	q40kbd_flush(q40kbd);
 }
 
-static int __devinit q40kbd_probe(struct platform_device *pdev)
+static int q40kbd_probe(struct platform_device *pdev)
 {
 	struct q40kbd *q40kbd;
 	struct serio *port;
@@ -168,7 +151,7 @@ err_free_mem:
 	return error;
 }
 
-static int __devexit q40kbd_remove(struct platform_device *pdev)
+static int q40kbd_remove(struct platform_device *pdev)
 {
 	struct q40kbd *q40kbd = platform_get_drvdata(pdev);
 
@@ -181,27 +164,14 @@ static int __devexit q40kbd_remove(struct platform_device *pdev)
 	free_irq(Q40_IRQ_KEYBOARD, q40kbd);
 	kfree(q40kbd);
 
-	platform_set_drvdata(pdev, NULL);
 	return 0;
 }
 
 static struct platform_driver q40kbd_driver = {
 	.driver		= {
 		.name	= "q40kbd",
-		.owner	= THIS_MODULE,
 	},
-	.remove		= __devexit_p(q40kbd_remove),
+	.remove		= q40kbd_remove,
 };
 
-static int __init q40kbd_init(void)
-{
-	return platform_driver_probe(&q40kbd_driver, q40kbd_probe);
-}
-
-static void __exit q40kbd_exit(void)
-{
-	platform_driver_unregister(&q40kbd_driver);
-}
-
-module_init(q40kbd_init);
-module_exit(q40kbd_exit);
+module_platform_driver_probe(q40kbd_driver, q40kbd_probe);

@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/arch/unicore32/boot/compressed/misc.c
  *
  * Code specific to PKUnity SoC and UniCore ISA
  *
  * Copyright (C) 2001-2010 GUAN Xue-tao
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <asm/unaligned.h>
@@ -119,8 +116,8 @@ unsigned long decompress_kernel(unsigned long output_start,
 	output_ptr = get_unaligned_le32(tmp);
 
 	arch_decomp_puts("Uncompressing Linux...");
-	decompress(input_data, input_data_end - input_data, NULL, NULL,
-			output_data, NULL, error);
+	__decompress(input_data, input_data_end - input_data, NULL, NULL,
+			output_data, 0, NULL, error);
 	arch_decomp_puts(" done, booting the kernel.\n");
 	return output_ptr;
 }

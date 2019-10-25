@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * arch/sh/kernel/machvec.c
  *
@@ -5,10 +6,6 @@
  *
  *  Copyright (C) 1999  Niibe Yutaka
  *  Copyright (C) 2002 - 2007 Paul Mundt
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 #include <linux/init.h>
 #include <linux/string.h>
@@ -121,7 +118,4 @@ void __init sh_mv_setup(void)
 	mv_set(irq_demux);
 	mv_set(mode_pins);
 	mv_set(mem_init);
-
-	if (!sh_mv.mv_nr_irqs)
-		sh_mv.mv_nr_irqs = NR_IRQS;
 }

@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/arch/arm/mach-omap1/mcbsp.c
  *
  * Copyright (C) 2008 Instituto Nokia de Tecnologia
  * Contact: Eduardo Valentin <eduardo.valentin@indt.org.br>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Multichannel mode not supported.
  */
@@ -19,10 +16,10 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 
-#include <plat/dma.h>
-#include <plat/mux.h>
-#include <plat/cpu.h>
-#include <plat/mcbsp.h>
+#include <linux/omap-dma.h>
+#include <mach/mux.h>
+#include "soc.h"
+#include <linux/platform_data/asoc-ti-mcbsp.h>
 
 #include <mach/irqs.h>
 
@@ -113,12 +110,12 @@ struct resource omap7xx_mcbsp_res[][6] = {
 		},
 		{
 			.name  = "rx",
-			.start = OMAP_DMA_MCBSP1_RX,
+			.start = 9,
 			.flags = IORESOURCE_DMA,
 		},
 		{
 			.name  = "tx",
-			.start = OMAP_DMA_MCBSP1_TX,
+			.start = 8,
 			.flags = IORESOURCE_DMA,
 		},
 	},
@@ -140,12 +137,12 @@ struct resource omap7xx_mcbsp_res[][6] = {
 		},
 		{
 			.name  = "rx",
-			.start = OMAP_DMA_MCBSP3_RX,
+			.start = 11,
 			.flags = IORESOURCE_DMA,
 		},
 		{
 			.name  = "tx",
-			.start = OMAP_DMA_MCBSP3_TX,
+			.start = 10,
 			.flags = IORESOURCE_DMA,
 		},
 	},
@@ -190,12 +187,12 @@ struct resource omap15xx_mcbsp_res[][6] = {
 		},
 		{
 			.name  = "rx",
-			.start = OMAP_DMA_MCBSP1_RX,
+			.start = 9,
 			.flags = IORESOURCE_DMA,
 		},
 		{
 			.name  = "tx",
-			.start = OMAP_DMA_MCBSP1_TX,
+			.start = 8,
 			.flags = IORESOURCE_DMA,
 		},
 	},
@@ -217,12 +214,12 @@ struct resource omap15xx_mcbsp_res[][6] = {
 		},
 		{
 			.name  = "rx",
-			.start = OMAP_DMA_MCBSP2_RX,
+			.start = 17,
 			.flags = IORESOURCE_DMA,
 		},
 		{
 			.name  = "tx",
-			.start = OMAP_DMA_MCBSP2_TX,
+			.start = 16,
 			.flags = IORESOURCE_DMA,
 		},
 	},
@@ -244,12 +241,12 @@ struct resource omap15xx_mcbsp_res[][6] = {
 		},
 		{
 			.name  = "rx",
-			.start = OMAP_DMA_MCBSP3_RX,
+			.start = 11,
 			.flags = IORESOURCE_DMA,
 		},
 		{
 			.name  = "tx",
-			.start = OMAP_DMA_MCBSP3_TX,
+			.start = 10,
 			.flags = IORESOURCE_DMA,
 		},
 	},
@@ -297,12 +294,12 @@ struct resource omap16xx_mcbsp_res[][6] = {
 		},
 		{
 			.name  = "rx",
-			.start = OMAP_DMA_MCBSP1_RX,
+			.start = 9,
 			.flags = IORESOURCE_DMA,
 		},
 		{
 			.name  = "tx",
-			.start = OMAP_DMA_MCBSP1_TX,
+			.start = 8,
 			.flags = IORESOURCE_DMA,
 		},
 	},
@@ -324,12 +321,12 @@ struct resource omap16xx_mcbsp_res[][6] = {
 		},
 		{
 			.name  = "rx",
-			.start = OMAP_DMA_MCBSP2_RX,
+			.start = 17,
 			.flags = IORESOURCE_DMA,
 		},
 		{
 			.name  = "tx",
-			.start = OMAP_DMA_MCBSP2_TX,
+			.start = 16,
 			.flags = IORESOURCE_DMA,
 		},
 	},
@@ -351,12 +348,12 @@ struct resource omap16xx_mcbsp_res[][6] = {
 		},
 		{
 			.name  = "rx",
-			.start = OMAP_DMA_MCBSP3_RX,
+			.start = 11,
 			.flags = IORESOURCE_DMA,
 		},
 		{
 			.name  = "tx",
-			.start = OMAP_DMA_MCBSP3_TX,
+			.start = 10,
 			.flags = IORESOURCE_DMA,
 		},
 	},
@@ -389,7 +386,7 @@ static void omap_mcbsp_register_board_cfg(struct resource *res, int res_count,
 {
 	int i;
 
-	omap_mcbsp_devices = kzalloc(size * sizeof(struct platform_device *),
+	omap_mcbsp_devices = kcalloc(size, sizeof(struct platform_device *),
 				     GFP_KERNEL);
 	if (!omap_mcbsp_devices) {
 		printk(KERN_ERR "Could not register McBSP devices\n");

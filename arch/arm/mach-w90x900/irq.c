@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/arch/arm/mach-w90x900/irq.c
  *
@@ -7,11 +8,6 @@
  * All rights reserved.
  *
  * Wan ZongShun <mcuos.com@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation;version 2 of the License.
- *
  */
 
 #include <linux/init.h>
@@ -211,6 +207,6 @@ void __init nuc900_init_irq(void)
 	for (irqno = IRQ_WDT; irqno <= IRQ_ADC; irqno++) {
 		irq_set_chip_and_handler(irqno, &nuc900_irq_chip,
 					 handle_level_irq);
-		set_irq_flags(irqno, IRQF_VALID);
+		irq_clear_status_flags(irqno, IRQ_NOREQUEST);
 	}
 }

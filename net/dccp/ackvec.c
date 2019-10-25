@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  net/dccp/ackvec.c
  *
  *  An implementation of Ack Vectors for the DCCP protocol
  *  Copyright (c) 2007 University of Aberdeen, Scotland, UK
  *  Copyright (c) 2005 Arnaldo Carvalho de Melo <acme@ghostprotocols.net>
- *
- *      This program is free software; you can redistribute it and/or modify it
- *      under the terms of the GNU General Public License as published by the
- *      Free Software Foundation; version 2 of the License;
  */
 #include "dccp.h"
 #include <linux/kernel.h>
@@ -218,7 +215,7 @@ static void dccp_ackvec_add_new(struct dccp_ackvec *av, u32 num_packets,
 		 * different underlying data structure.
 		 */
 		for (num_packets = num_cells = 1; lost_packets; ++num_cells) {
-			u8 len = min(lost_packets, (u32)DCCPAV_MAX_RUNLEN);
+			u8 len = min_t(u32, lost_packets, DCCPAV_MAX_RUNLEN);
 
 			av->av_buf_head = __ackvec_idx_sub(av->av_buf_head, 1);
 			av->av_buf[av->av_buf_head] = DCCPAV_NOT_RECEIVED | len;
@@ -228,7 +225,7 @@ static void dccp_ackvec_add_new(struct dccp_ackvec *av, u32 num_packets,
 	}
 
 	if (num_cells + dccp_ackvec_buflen(av) >= DCCPAV_MAX_ACKVEC_LEN) {
-		DCCP_CRIT("Ack Vector buffer overflow: dropping old entries\n");
+		DCCP_CRIT("Ack Vector buffer overflow: dropping old entries");
 		av->av_overflow = true;
 	}
 
@@ -398,12 +395,8 @@ out_err:
 
 void dccp_ackvec_exit(void)
 {
-	if (dccp_ackvec_slab != NULL) {
-		kmem_cache_destroy(dccp_ackvec_slab);
-		dccp_ackvec_slab = NULL;
-	}
-	if (dccp_ackvec_record_slab != NULL) {
-		kmem_cache_destroy(dccp_ackvec_record_slab);
-		dccp_ackvec_record_slab = NULL;
-	}
+	kmem_cache_destroy(dccp_ackvec_slab);
+	dccp_ackvec_slab = NULL;
+	kmem_cache_destroy(dccp_ackvec_record_slab);
+	dccp_ackvec_record_slab = NULL;
 }

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) Freescale Semicondutor, Inc. 2006-2009. All rights reserved.
  *
@@ -9,11 +10,6 @@
  * Changelog:
  * Jun 28, 2006 Li Yang <LeoLi@freescale.com>
  * - Rearrange code and style fixes
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 #ifndef __UCC_GETH_H__
 #define __UCC_GETH_H__
@@ -22,11 +18,11 @@
 #include <linux/list.h>
 #include <linux/if_ether.h>
 
-#include <asm/immap_qe.h>
-#include <asm/qe.h>
+#include <soc/fsl/qe/immap_qe.h>
+#include <soc/fsl/qe/qe.h>
 
-#include <asm/ucc.h>
-#include <asm/ucc_fast.h>
+#include <soc/fsl/qe/ucc.h>
+#include <soc/fsl/qe/ucc_fast.h>
 
 #define DRV_DESC "QE UCC Gigabit Ethernet Controller"
 #define DRV_NAME "ucc_geth"
@@ -1213,8 +1209,6 @@ struct ucc_geth_private {
 	u16 skb_currx[NUM_RX_QUEUES];
 	/* index of the first skb which hasn't been transmitted yet. */
 	u16 skb_dirtytx[NUM_TX_QUEUES];
-
-	struct sk_buff_head rx_recycle;
 
 	struct ugeth_mii_info *mii_info;
 	struct phy_device *phydev;

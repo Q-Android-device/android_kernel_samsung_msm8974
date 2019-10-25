@@ -1,17 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 /* USX2Y "rawusb" aka hwdep_pcm implementation
@@ -358,8 +346,8 @@ static int snd_usX2Y_usbpcm_hw_free(struct snd_pcm_substream *substream)
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_usX2Y_substream *subs = runtime->private_data,
 		*cap_subs2 = subs->usX2Y->subs[SNDRV_PCM_STREAM_CAPTURE + 2];
-	mutex_lock(&subs->usX2Y->prepare_mutex);
-	snd_printdd("snd_usX2Y_usbpcm_hw_free(%pK)\n", substream);
+	mutex_lock(&subs->usX2Y->pcm_mutex);
+	snd_printdd("snd_usX2Y_usbpcm_hw_free(%p)\n", substream);
 
 	if (SNDRV_PCM_STREAM_PLAYBACK == substream->stream) {
 		struct snd_usX2Y_substream *cap_subs = subs->usX2Y->subs[SNDRV_PCM_STREAM_CAPTURE];
@@ -387,7 +375,7 @@ static int snd_usX2Y_usbpcm_hw_free(struct snd_pcm_substream *substream)
 				usX2Y_usbpcm_urbs_release(cap_subs2);
 		}
 	}
-	mutex_unlock(&subs->usX2Y->prepare_mutex);
+	mutex_unlock(&subs->usX2Y->pcm_mutex);
 	return snd_pcm_lib_free_pages(substream);
 }
 
@@ -438,7 +426,6 @@ static int usX2Y_usbpcm_urbs_start(struct snd_usX2Y_substream *subs)
 					if (0 == u)
 						atomic_set(&subs->state, state_STARTING3);
 					urb->dev = usX2Y->dev;
-					urb->transfer_flags = URB_ISO_ASAP;
 					for (pack = 0; pack < nr_of_packs(); pack++) {
 						urb->iso_frame_desc[pack].offset = subs->maxpacksize * (pack + u * nr_of_packs());
 						urb->iso_frame_desc[pack].length = subs->maxpacksize;
@@ -486,15 +473,17 @@ static int snd_usX2Y_usbpcm_prepare(struct snd_pcm_substream *substream)
 	struct usX2Ydev *usX2Y = subs->usX2Y;
 	struct snd_usX2Y_substream *capsubs = subs->usX2Y->subs[SNDRV_PCM_STREAM_CAPTURE];
 	int err = 0;
-	snd_printdd("snd_usX2Y_pcm_prepare(%pK)\n", substream);
+	snd_printdd("snd_usX2Y_pcm_prepare(%p)\n", substream);
 
 	if (NULL == usX2Y->hwdep_pcm_shm) {
-		if (NULL == (usX2Y->hwdep_pcm_shm = snd_malloc_pages(sizeof(struct snd_usX2Y_hwdep_pcm_shm), GFP_KERNEL)))
+		usX2Y->hwdep_pcm_shm = alloc_pages_exact(sizeof(struct snd_usX2Y_hwdep_pcm_shm),
+							 GFP_KERNEL);
+		if (!usX2Y->hwdep_pcm_shm)
 			return -ENOMEM;
 		memset(usX2Y->hwdep_pcm_shm, 0, sizeof(struct snd_usX2Y_hwdep_pcm_shm));
 	}
 
-	mutex_lock(&usX2Y->prepare_mutex);
+	mutex_lock(&usX2Y->pcm_mutex);
 	usX2Y_subs_prepare(subs);
 // Start hardware streams
 // SyncStream first....
@@ -535,7 +524,7 @@ static int snd_usX2Y_usbpcm_prepare(struct snd_pcm_substream *substream)
 		usX2Y->hwdep_pcm_shm->capture_iso_start = -1;
 
  up_prepare_mutex:
-	mutex_unlock(&usX2Y->prepare_mutex);
+	mutex_unlock(&usX2Y->pcm_mutex);
 	return err;
 }
 
@@ -588,7 +577,7 @@ static int snd_usX2Y_usbpcm_close(struct snd_pcm_substream *substream)
 }
 
 
-static struct snd_pcm_ops snd_usX2Y_usbpcm_ops = 
+static const struct snd_pcm_ops snd_usX2Y_usbpcm_ops =
 {
 	.open =		snd_usX2Y_usbpcm_open,
 	.close =	snd_usX2Y_usbpcm_close,
@@ -601,59 +590,30 @@ static struct snd_pcm_ops snd_usX2Y_usbpcm_ops =
 };
 
 
-static int usX2Y_pcms_lock_check(struct snd_card *card)
+static int usX2Y_pcms_busy_check(struct snd_card *card)
 {
-	struct list_head *list;
-	struct snd_device *dev;
-	struct snd_pcm *pcm;
-	int err = 0;
-	list_for_each(list, &card->devices) {
-		dev = snd_device(list);
-		if (dev->type != SNDRV_DEV_PCM)
-			continue;
-		pcm = dev->device_data;
-		mutex_lock(&pcm->open_mutex);
+	struct usX2Ydev	*dev = usX2Y(card);
+	int i;
+
+	for (i = 0; i < dev->pcm_devs * 2; i++) {
+		struct snd_usX2Y_substream *subs = dev->subs[i];
+		if (subs && subs->pcm_substream &&
+		    SUBSTREAM_BUSY(subs->pcm_substream))
+			return -EBUSY;
 	}
-	list_for_each(list, &card->devices) {
-		int s;
-		dev = snd_device(list);
-		if (dev->type != SNDRV_DEV_PCM)
-			continue;
-		pcm = dev->device_data;
-		for (s = 0; s < 2; ++s) {
-			struct snd_pcm_substream *substream;
-			substream = pcm->streams[s].substream;
-			if (substream && SUBSTREAM_BUSY(substream))
-				err = -EBUSY;
-		}
-	}
-	return err;
+	return 0;
 }
-
-
-static void usX2Y_pcms_unlock(struct snd_card *card)
-{
-	struct list_head *list;
-	struct snd_device *dev;
-	struct snd_pcm *pcm;
-	list_for_each(list, &card->devices) {
-		dev = snd_device(list);
-		if (dev->type != SNDRV_DEV_PCM)
-			continue;
-		pcm = dev->device_data;
-		mutex_unlock(&pcm->open_mutex);
-	}
-}
-
 
 static int snd_usX2Y_hwdep_pcm_open(struct snd_hwdep *hw, struct file *file)
 {
-	// we need to be the first 
 	struct snd_card *card = hw->card;
-	int err = usX2Y_pcms_lock_check(card);
-	if (0 == err)
+	int err;
+
+	mutex_lock(&usX2Y(card)->pcm_mutex);
+	err = usX2Y_pcms_busy_check(card);
+	if (!err)
 		usX2Y(card)->chip_status |= USX2Y_STAT_CHIP_MMAP_PCM_URBS;
-	usX2Y_pcms_unlock(card);
+	mutex_unlock(&usX2Y(card)->pcm_mutex);
 	return err;
 }
 
@@ -661,10 +621,13 @@ static int snd_usX2Y_hwdep_pcm_open(struct snd_hwdep *hw, struct file *file)
 static int snd_usX2Y_hwdep_pcm_release(struct snd_hwdep *hw, struct file *file)
 {
 	struct snd_card *card = hw->card;
-	int err = usX2Y_pcms_lock_check(card);
-	if (0 == err)
+	int err;
+
+	mutex_lock(&usX2Y(card)->pcm_mutex);
+	err = usX2Y_pcms_busy_check(card);
+	if (!err)
 		usX2Y(hw->card)->chip_status &= ~USX2Y_STAT_CHIP_MMAP_PCM_URBS;
-	usX2Y_pcms_unlock(card);
+	mutex_unlock(&usX2Y(card)->pcm_mutex);
 	return err;
 }
 
@@ -679,14 +642,13 @@ static void snd_usX2Y_hwdep_pcm_vm_close(struct vm_area_struct *area)
 }
 
 
-static int snd_usX2Y_hwdep_pcm_vm_fault(struct vm_area_struct *area,
-					struct vm_fault *vmf)
+static vm_fault_t snd_usX2Y_hwdep_pcm_vm_fault(struct vm_fault *vmf)
 {
 	unsigned long offset;
 	void *vaddr;
 
 	offset = vmf->pgoff << PAGE_SHIFT;
-	vaddr = (char*)((struct usX2Ydev *)area->vm_private_data)->hwdep_pcm_shm + offset;
+	vaddr = (char *)((struct usX2Ydev *)vmf->vma->vm_private_data)->hwdep_pcm_shm + offset;
 	vmf->page = virt_to_page(vaddr);
 	get_page(vmf->page);
 	return 0;
@@ -718,7 +680,7 @@ static int snd_usX2Y_hwdep_pcm_mmap(struct snd_hwdep * hw, struct file *filp, st
 		return -ENODEV;
 	}
 	area->vm_ops = &snd_usX2Y_hwdep_pcm_vm_ops;
-	area->vm_flags |= VM_RESERVED | VM_DONTEXPAND;
+	area->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
 	area->vm_private_data = hw->private_data;
 	return 0;
 }
@@ -728,7 +690,7 @@ static void snd_usX2Y_hwdep_pcm_private_free(struct snd_hwdep *hwdep)
 {
 	struct usX2Ydev *usX2Y = hwdep->private_data;
 	if (NULL != usX2Y->hwdep_pcm_shm)
-		snd_free_pages(usX2Y->hwdep_pcm_shm, sizeof(struct snd_usX2Y_hwdep_pcm_shm));
+		free_pages_exact(usX2Y->hwdep_pcm_shm, sizeof(struct snd_usX2Y_hwdep_pcm_shm));
 }
 
 
@@ -751,7 +713,7 @@ int usX2Y_hwdep_pcm_new(struct snd_card *card)
 	hw->ops.release = snd_usX2Y_hwdep_pcm_release;
 	hw->ops.mmap = snd_usX2Y_hwdep_pcm_mmap;
 	hw->exclusive = 1;
-	sprintf(hw->name, "/proc/bus/usb/%03d/%03d/hwdeppcm", dev->bus->busnum, dev->devnum);
+	sprintf(hw->name, "/dev/bus/usb/%03d/%03d/hwdeppcm", dev->bus->busnum, dev->devnum);
 
 	err = snd_pcm_new(card, NAME_ALLCAPS" hwdep Audio", 2, 1, 1, &pcm);
 	if (err < 0) {
@@ -764,17 +726,14 @@ int usX2Y_hwdep_pcm_new(struct snd_card *card)
 	pcm->info_flags = 0;
 
 	sprintf(pcm->name, NAME_ALLCAPS" hwdep Audio");
-	if (0 > (err = snd_pcm_lib_preallocate_pages(pcm->streams[SNDRV_PCM_STREAM_PLAYBACK].substream,
-						     SNDRV_DMA_TYPE_CONTINUOUS,
-						     snd_dma_continuous_data(GFP_KERNEL),
-						     64*1024, 128*1024)) ||
-	    0 > (err = snd_pcm_lib_preallocate_pages(pcm->streams[SNDRV_PCM_STREAM_CAPTURE].substream,
-	    					     SNDRV_DMA_TYPE_CONTINUOUS,
-	    					     snd_dma_continuous_data(GFP_KERNEL),
-						     64*1024, 128*1024))) {
-		return err;
-	}
-
+	snd_pcm_lib_preallocate_pages(pcm->streams[SNDRV_PCM_STREAM_PLAYBACK].substream,
+				      SNDRV_DMA_TYPE_CONTINUOUS,
+				      snd_dma_continuous_data(GFP_KERNEL),
+				      64*1024, 128*1024);
+	snd_pcm_lib_preallocate_pages(pcm->streams[SNDRV_PCM_STREAM_CAPTURE].substream,
+				      SNDRV_DMA_TYPE_CONTINUOUS,
+				      snd_dma_continuous_data(GFP_KERNEL),
+				      64*1024, 128*1024);
 
 	return 0;
 }

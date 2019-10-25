@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	IT8712F "Smart Guardian" Watchdog support
  *
@@ -9,11 +10,6 @@
  *	drivers/hwmon/it87.c
  *	IT8712F EC-LPC I/O Preliminary Specification 0.8.2
  *	IT8712F EC-LPC I/O Preliminary Specification 0.9.3
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License as
- *	published by the Free Software Foundation; either version 2 of the
- *	License, or (at your option) any later version.
  *
  *	The author(s) of this software shall not be held liable for damages
  *	of any nature resulting due to the use of this software. This
@@ -41,7 +37,6 @@
 MODULE_AUTHOR("Jorge Boncompte - DTI2 <jorge@dti2.net>");
 MODULE_DESCRIPTION("IT8712F Watchdog Driver");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);
 
 static int max_units = 255;
 static int margin = 60;		/* in seconds */
@@ -328,7 +323,7 @@ static int it8712f_wdt_open(struct inode *inode, struct file *file)
 	ret = it8712f_wdt_enable();
 	if (ret)
 		return ret;
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 static int it8712f_wdt_release(struct inode *inode, struct file *file)

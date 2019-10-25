@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Wireless USB Standard Definitions
  * Event Size Tables
@@ -235,22 +236,6 @@ enum {
 	WUSB_TRUST_TIMEOUT_MS = 4000,	/* [WUSB] section 4.15.1 */
 };
 
-static inline size_t ckhdid_printf(char *pr_ckhdid, size_t size,
-				   const struct wusb_ckhdid *ckhdid)
-{
-	return scnprintf(pr_ckhdid, size,
-			 "%02hx %02hx %02hx %02hx %02hx %02hx %02hx %02hx "
-			 "%02hx %02hx %02hx %02hx %02hx %02hx %02hx %02hx",
-			 ckhdid->data[0],  ckhdid->data[1],
-			 ckhdid->data[2],  ckhdid->data[3],
-			 ckhdid->data[4],  ckhdid->data[5],
-			 ckhdid->data[6],  ckhdid->data[7],
-			 ckhdid->data[8],  ckhdid->data[9],
-			 ckhdid->data[10], ckhdid->data[11],
-			 ckhdid->data[12], ckhdid->data[13],
-			 ckhdid->data[14], ckhdid->data[15]);
-}
-
 /*
  * WUSB Crypto stuff (WUSB1.0[6])
  */
@@ -271,6 +256,8 @@ static inline u8 wusb_key_index(int index, int type, int originator)
 #define WUSB_KEY_INDEX_TYPE_GTK			2
 #define WUSB_KEY_INDEX_ORIGINATOR_HOST		0
 #define WUSB_KEY_INDEX_ORIGINATOR_DEVICE	1
+/* bits 0-3 used for the key index. */
+#define WUSB_KEY_INDEX_MAX			15
 
 /* A CCM Nonce, defined in WUSB1.0[6.4.1] */
 struct aes_ccm_nonce {

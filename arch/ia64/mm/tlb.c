@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * TLB support routines.
  *
@@ -21,7 +22,7 @@
 #include <linux/sched.h>
 #include <linux/smp.h>
 #include <linux/mm.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 #include <linux/slab.h>
 
 #include <asm/delay.h>
@@ -59,8 +60,16 @@ struct ia64_tr_entry *ia64_idtrs[NR_CPUS];
 void __init
 mmu_context_init (void)
 {
-	ia64_ctx.bitmap = alloc_bootmem((ia64_ctx.max_ctx+1)>>3);
-	ia64_ctx.flushmap = alloc_bootmem((ia64_ctx.max_ctx+1)>>3);
+	ia64_ctx.bitmap = memblock_alloc((ia64_ctx.max_ctx + 1) >> 3,
+					 SMP_CACHE_BYTES);
+	if (!ia64_ctx.bitmap)
+		panic("%s: Failed to allocate %u bytes\n", __func__,
+		      (ia64_ctx.max_ctx + 1) >> 3);
+	ia64_ctx.flushmap = memblock_alloc((ia64_ctx.max_ctx + 1) >> 3,
+					   SMP_CACHE_BYTES);
+	if (!ia64_ctx.flushmap)
+		panic("%s: Failed to allocate %u bytes\n", __func__,
+		      (ia64_ctx.max_ctx + 1) >> 3);
 }
 
 /*
@@ -297,8 +306,8 @@ local_flush_tlb_all (void)
 	ia64_srlz_i();			/* srlz.i implies srlz.d */
 }
 
-void
-flush_tlb_range (struct vm_area_struct *vma, unsigned long start,
+static void
+__flush_tlb_range (struct vm_area_struct *vma, unsigned long start,
 		 unsigned long end)
 {
 	struct mm_struct *mm = vma->vm_mm;
@@ -335,10 +344,28 @@ flush_tlb_range (struct vm_area_struct *vma, unsigned long start,
 	preempt_enable();
 	ia64_srlz_i();			/* srlz.i implies srlz.d */
 }
+
+void flush_tlb_range(struct vm_area_struct *vma,
+		unsigned long start, unsigned long end)
+{
+	if (unlikely(end - start >= 1024*1024*1024*1024UL
+			|| REGION_NUMBER(start) != REGION_NUMBER(end - 1))) {
+		/*
+		 * If we flush more than a tera-byte or across regions, we're
+		 * probably better off just flushing the entire TLB(s).  This
+		 * should be very rare and is not worth optimizing for.
+		 */
+		flush_tlb_all();
+	} else {
+		/* flush the address range from the tlb */
+		__flush_tlb_range(vma, start, end);
+		/* flush the virt. page-table area mapping the addr range */
+		__flush_tlb_range(vma, ia64_thash(start), ia64_thash(end));
+	}
+}
 EXPORT_SYMBOL(flush_tlb_range);
 
-void __devinit
-ia64_tlb_init (void)
+void ia64_tlb_init(void)
 {
 	ia64_ptce_info_t uninitialized_var(ptce_info); /* GCC be quiet */
 	u64 tr_pgbits;
@@ -431,8 +458,9 @@ int ia64_itr_entry(u64 target_mask, u64 va, u64 pte, u64 log_size)
 	int cpu = smp_processor_id();
 
 	if (!ia64_idtrs[cpu]) {
-		ia64_idtrs[cpu] = kmalloc(2 * IA64_TR_ALLOC_MAX *
-				sizeof (struct ia64_tr_entry), GFP_KERNEL);
+		ia64_idtrs[cpu] = kmalloc_array(2 * IA64_TR_ALLOC_MAX,
+						sizeof(struct ia64_tr_entry),
+						GFP_KERNEL);
 		if (!ia64_idtrs[cpu])
 			return -ENOMEM;
 	}
@@ -445,7 +473,7 @@ int ia64_itr_entry(u64 target_mask, u64 va, u64 pte, u64 log_size)
 			if (p->pte & 0x1)
 				if (is_tr_overlap(p, va, log_size)) {
 					printk(KERN_DEBUG "Overlapped Entry"
-						"Inserted for TR Reigster!!\n");
+						"Inserted for TR Register!!\n");
 					goto out;
 			}
 		}
@@ -457,7 +485,7 @@ int ia64_itr_entry(u64 target_mask, u64 va, u64 pte, u64 log_size)
 			if (p->pte & 0x1)
 				if (is_tr_overlap(p, va, log_size)) {
 					printk(KERN_DEBUG "Overlapped Entry"
-						"Inserted for TR Reigster!!\n");
+						"Inserted for TR Register!!\n");
 					goto out;
 				}
 		}

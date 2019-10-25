@@ -1,10 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) ST-Ericsson AB 2010
- * Contact: Sjur Brendeland / sjur.brandeland@stericsson.com
- * Author:  Daniel Martensson / Daniel.Martensson@stericsson.com
- * License terms: GNU General Public License (GPL) version 2.
+ * Author:  Daniel Martensson
  */
-#include <linux/init.h>
 #include <linux/module.h>
 #include <linux/device.h>
 #include <linux/platform_device.h>

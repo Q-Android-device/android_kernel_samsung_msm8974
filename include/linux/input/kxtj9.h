@@ -1,20 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2011 Kionix, Inc.
  * Written by Chris Hudson <chudson@kionix.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
- * 02111-1307, USA
  */
 
 #ifndef __KXTJ9_H__
@@ -46,7 +33,7 @@ struct kxtj9_platform_data {
 	/* Output resolution: 8-bit valid or 12-bit valid */
 	#define RES_8BIT		0
 	#define RES_12BIT		(1 << 6)
-	u8 res_ctl;
+	u8 res_12bit;
 	/* Output g-range: +/-2g, 4g, or 8g */
 	#define KXTJ9_G_2G		0
 	#define KXTJ9_G_4G		(1 << 3)

@@ -136,7 +136,7 @@ static int fop_open(struct inode *inode, struct file *file)
 
 	wdt_enable();
 
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 static int fop_close(struct inode *inode, struct file *file)
@@ -309,5 +309,3 @@ MODULE_AUTHOR("Gilles Gigan");
 MODULE_DESCRIPTION("Watchdog device driver for single board"
 		   " computers EPIC Nano 7240 from iEi");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);
-

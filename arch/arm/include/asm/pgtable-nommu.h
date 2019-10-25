@@ -1,12 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  arch/arm/include/asm/pgtable-nommu.h
  *
  *  Copyright (C) 1995-2002 Russell King
  *  Copyright (C) 2004  Hyok S. Choi
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #ifndef _ASMARM_PGTABLE_NOMMU_H
 #define _ASMARM_PGTABLE_NOMMU_H
@@ -54,8 +51,6 @@
 
 typedef pte_t *pte_addr_t;
 
-static inline int pte_file(pte_t pte) { return 0; }
-
 /*
  * ZERO_PAGE is a global shared page that is always zero: used
  * for zero-mapped memory areas etc..
@@ -65,9 +60,10 @@ static inline int pte_file(pte_t pte) { return 0; }
 /*
  * Mark the prot value as uncacheable and unbufferable.
  */
-#define pgprot_noncached(prot)	__pgprot(0)
-#define pgprot_writecombine(prot) __pgprot(0)
-#define pgprot_dmacoherent(prot) __pgprot(0)
+#define pgprot_noncached(prot)	(prot)
+#define pgprot_writecombine(prot) (prot)
+#define pgprot_dmacoherent(prot) (prot)
+#define pgprot_device(prot)	(prot)
 
 
 /*
@@ -79,8 +75,6 @@ extern unsigned int kobjsize(const void *objp);
  * No page table caches to initialise.
  */
 #define pgtable_cache_init()	do { } while (0)
-#define io_remap_pfn_range	remap_pfn_range
-
 
 /*
  * All 32bit addresses are effectively valid for vmalloc...
@@ -89,7 +83,7 @@ extern unsigned int kobjsize(const void *objp);
 #define	VMALLOC_START	0UL
 #define	VMALLOC_END	0xffffffffUL
 
-#define FIRST_USER_ADDRESS      (0)
+#define FIRST_USER_ADDRESS      0UL
 
 #include <asm-generic/pgtable.h>
 

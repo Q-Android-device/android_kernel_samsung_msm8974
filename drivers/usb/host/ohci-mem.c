@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-1.0+
 /*
  * OHCI HCD (Host Controller Driver) for USB.
  *
@@ -28,6 +29,7 @@ static void ohci_hcd_init (struct ohci_hcd *ohci)
 	ohci->next_statechange = jiffies;
 	spin_lock_init (&ohci->lock);
 	INIT_LIST_HEAD (&ohci->pending);
+	INIT_LIST_HEAD(&ohci->eds_in_use);
 }
 
 /*-------------------------------------------------------------------------*/
@@ -55,14 +57,10 @@ static int ohci_mem_init (struct ohci_hcd *ohci)
 
 static void ohci_mem_cleanup (struct ohci_hcd *ohci)
 {
-	if (ohci->td_cache) {
-		dma_pool_destroy (ohci->td_cache);
-		ohci->td_cache = NULL;
-	}
-	if (ohci->ed_cache) {
-		dma_pool_destroy (ohci->ed_cache);
-		ohci->ed_cache = NULL;
-	}
+	dma_pool_destroy(ohci->td_cache);
+	ohci->td_cache = NULL;
+	dma_pool_destroy(ohci->ed_cache);
+	ohci->ed_cache = NULL;
 }
 
 /*-------------------------------------------------------------------------*/
@@ -87,10 +85,9 @@ td_alloc (struct ohci_hcd *hc, gfp_t mem_flags)
 	dma_addr_t	dma;
 	struct td	*td;
 
-	td = dma_pool_alloc (hc->td_cache, mem_flags, &dma);
+	td = dma_pool_zalloc (hc->td_cache, mem_flags, &dma);
 	if (td) {
 		/* in case hc fetches it, make it look dead */
-		memset (td, 0, sizeof *td);
 		td->hwNextTD = cpu_to_hc32 (hc, dma);
 		td->td_dma = dma;
 		/* hashed in td_fill */
@@ -108,7 +105,7 @@ td_free (struct ohci_hcd *hc, struct td *td)
 	if (*prev)
 		*prev = td->td_hash;
 	else if ((td->hwINFO & cpu_to_hc32(hc, TD_DONE)) != 0)
-		ohci_dbg (hc, "no hash for td %pK\n", td);
+		ohci_dbg (hc, "no hash for td %p\n", td);
 	dma_pool_free (hc->td_cache, td, td->td_dma);
 }
 
@@ -121,9 +118,8 @@ ed_alloc (struct ohci_hcd *hc, gfp_t mem_flags)
 	dma_addr_t	dma;
 	struct ed	*ed;
 
-	ed = dma_pool_alloc (hc->ed_cache, mem_flags, &dma);
+	ed = dma_pool_zalloc (hc->ed_cache, mem_flags, &dma);
 	if (ed) {
-		memset (ed, 0, sizeof (*ed));
 		INIT_LIST_HEAD (&ed->td_list);
 		ed->dma = dma;
 	}

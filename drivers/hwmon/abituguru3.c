@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * abituguru3.c
  *
  * Copyright (c) 2006-2008 Hans de Goede <hdegoede@redhat.com>
  * Copyright (c) 2008 Alistair John Strachan <alistair@devzero.co.uk>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 /*
  * This driver supports the sensor part of revision 3 of the custom Abit uGuru
@@ -76,9 +63,11 @@
 #define ABIT_UGURU3_SYNCHRONIZE_TIMEOUT		5
 /* utility macros */
 #define ABIT_UGURU3_NAME			"abituguru3"
-#define ABIT_UGURU3_DEBUG(format, arg...)	\
-	if (verbose)				\
-		printk(KERN_DEBUG ABIT_UGURU3_NAME ": "	format , ## arg)
+#define ABIT_UGURU3_DEBUG(format, arg...)		\
+	do {						\
+		if (verbose)				\
+			pr_debug(format , ## arg);	\
+	} while (0)
 
 /* Macros to help calculate the sysfs_names array length */
 #define ABIT_UGURU3_MAX_NO_SENSORS 26
@@ -174,7 +163,7 @@ struct abituguru3_data {
 
 	/*
 	 * The abituguru3 supports up to 48 sensors, and thus has registers
-	 * sets for 48 sensors, for convienence reasons / simplicity of the
+	 * sets for 48 sensors, for convenience reasons / simplicity of the
 	 * code we always read and store all registers for all 48 sensors
 	 */
 
@@ -966,7 +955,7 @@ static struct sensor_device_attribute_2 abituguru3_sysfs_attr[] = {
 	SENSOR_ATTR_2(name, 0444, show_name, NULL, 0, 0),
 };
 
-static int __devinit abituguru3_probe(struct platform_device *pdev)
+static int abituguru3_probe(struct platform_device *pdev)
 {
 	const int no_sysfs_attr[3] = { 10, 8, 7 };
 	int sensor_index[3] = { 0, 1, 1 };
@@ -976,7 +965,8 @@ static int __devinit abituguru3_probe(struct platform_device *pdev)
 	u8 buf[2];
 	u16 id;
 
-	data = kzalloc(sizeof(struct abituguru3_data), GFP_KERNEL);
+	data = devm_kzalloc(&pdev->dev, sizeof(struct abituguru3_data),
+			    GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
 
@@ -1068,24 +1058,20 @@ abituguru3_probe_error:
 	for (i = 0; i < ARRAY_SIZE(abituguru3_sysfs_attr); i++)
 		device_remove_file(&pdev->dev,
 			&abituguru3_sysfs_attr[i].dev_attr);
-	kfree(data);
 	return res;
 }
 
-static int __devexit abituguru3_remove(struct platform_device *pdev)
+static int abituguru3_remove(struct platform_device *pdev)
 {
 	int i;
 	struct abituguru3_data *data = platform_get_drvdata(pdev);
 
-	platform_set_drvdata(pdev, NULL);
 	hwmon_device_unregister(data->hwmon_dev);
 	for (i = 0; data->sysfs_attr[i].dev_attr.attr.name; i++)
 		device_remove_file(&pdev->dev, &data->sysfs_attr[i].dev_attr);
 	for (i = 0; i < ARRAY_SIZE(abituguru3_sysfs_attr); i++)
 		device_remove_file(&pdev->dev,
 			&abituguru3_sysfs_attr[i].dev_attr);
-	kfree(data);
-
 	return 0;
 }
 
@@ -1141,10 +1127,10 @@ LEAVE_UPDATE:
 		return NULL;
 }
 
-#ifdef CONFIG_PM
-static int abituguru3_suspend(struct platform_device *pdev, pm_message_t state)
+#ifdef CONFIG_PM_SLEEP
+static int abituguru3_suspend(struct device *dev)
 {
-	struct abituguru3_data *data = platform_get_drvdata(pdev);
+	struct abituguru3_data *data = dev_get_drvdata(dev);
 	/*
 	 * make sure all communications with the uguru3 are done and no new
 	 * ones are started
@@ -1153,26 +1139,26 @@ static int abituguru3_suspend(struct platform_device *pdev, pm_message_t state)
 	return 0;
 }
 
-static int abituguru3_resume(struct platform_device *pdev)
+static int abituguru3_resume(struct device *dev)
 {
-	struct abituguru3_data *data = platform_get_drvdata(pdev);
+	struct abituguru3_data *data = dev_get_drvdata(dev);
 	mutex_unlock(&data->update_lock);
 	return 0;
 }
+
+static SIMPLE_DEV_PM_OPS(abituguru3_pm, abituguru3_suspend, abituguru3_resume);
+#define ABIT_UGURU3_PM	(&abituguru3_pm)
 #else
-#define abituguru3_suspend	NULL
-#define abituguru3_resume	NULL
+#define ABIT_UGURU3_PM	NULL
 #endif /* CONFIG_PM */
 
 static struct platform_driver abituguru3_driver = {
 	.driver = {
-		.owner	= THIS_MODULE,
 		.name	= ABIT_UGURU3_NAME,
+		.pm	= ABIT_UGURU3_PM
 	},
 	.probe	= abituguru3_probe,
-	.remove	= __devexit_p(abituguru3_remove),
-	.suspend = abituguru3_suspend,
-	.resume = abituguru3_resume
+	.remove	= abituguru3_remove,
 };
 
 static int __init abituguru3_dmi_detect(void)

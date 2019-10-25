@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/arch/arm/kernel/swp_emulate.c
  *
  *  Copyright (C) 2009 ARM Limited
  *  __user_* functions adapted from include/asm/uaccess.h
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  *  Implements emulation of the SWP/SWPB instructions using load-exclusive and
  *  store-exclusive for processors that have them disabled (or future ones that
@@ -21,26 +18,29 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/proc_fs.h>
+#include <linux/seq_file.h>
 #include <linux/sched.h>
+#include <linux/sched/mm.h>
 #include <linux/syscalls.h>
 #include <linux/perf_event.h>
 
 #include <asm/opcodes.h>
+#include <asm/system_info.h>
 #include <asm/traps.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 /*
  * Error-checking SWP macros implemented using ldrex{b}/strex{b}
  */
 #define __user_swpX_asm(data, addr, res, temp, B)		\
 	__asm__ __volatile__(					\
-	"	mov		%2, %1\n"			\
-	"0:	ldrex"B"	%1, [%3]\n"			\
-	"1:	strex"B"	%0, %2, [%3]\n"			\
+	"0:	ldrex"B"	%2, [%3]\n"			\
+	"1:	strex"B"	%0, %1, [%3]\n"			\
 	"	cmp		%0, #0\n"			\
+	"	moveq		%1, %2\n"			\
 	"	movne		%0, %4\n"			\
 	"2:\n"							\
-	"	.section	 .fixup,\"ax\"\n"		\
+	"	.section	 .text.fixup,\"ax\"\n"		\
 	"	.align		2\n"				\
 	"3:	mov		%0, %5\n"			\
 	"	b		2b\n"				\
@@ -79,26 +79,14 @@ static unsigned long abtcounter;
 static pid_t         previous_pid;
 
 #ifdef CONFIG_PROC_FS
-static int proc_read_status(char *page, char **start, off_t off, int count,
-			    int *eof, void *data)
+static int proc_status_show(struct seq_file *m, void *v)
 {
-	char *p = page;
-	int len;
-
-	p += sprintf(p, "Emulated SWP:\t\t%lu\n", swpcounter);
-	p += sprintf(p, "Emulated SWPB:\t\t%lu\n", swpbcounter);
-	p += sprintf(p, "Aborted SWP{B}:\t\t%lu\n", abtcounter);
+	seq_printf(m, "Emulated SWP:\t\t%lu\n", swpcounter);
+	seq_printf(m, "Emulated SWPB:\t\t%lu\n", swpbcounter);
+	seq_printf(m, "Aborted SWP{B}:\t\t%lu\n", abtcounter);
 	if (previous_pid != 0)
-		p += sprintf(p, "Last process:\t\t%d\n", previous_pid);
-
-	len = (p - page) - off;
-	if (len < 0)
-		len = 0;
-
-	*eof = (len <= count) ? 1 : 0;
-	*start = page + off;
-
-	return len;
+		seq_printf(m, "Last process:\t\t%d\n", previous_pid);
+	return 0;
 }
 #endif
 
@@ -107,21 +95,20 @@ static int proc_read_status(char *page, char **start, off_t off, int count,
  */
 static void set_segfault(struct pt_regs *regs, unsigned long addr)
 {
-	siginfo_t info;
+	int si_code;
 
 	down_read(&current->mm->mmap_sem);
 	if (find_vma(current->mm, addr) == NULL)
-		info.si_code = SEGV_MAPERR;
+		si_code = SEGV_MAPERR;
 	else
-		info.si_code = SEGV_ACCERR;
+		si_code = SEGV_ACCERR;
 	up_read(&current->mm->mmap_sem);
 
-	info.si_signo = SIGSEGV;
-	info.si_errno = 0;
-	info.si_addr  = (void *) instruction_pointer(regs);
-
 	pr_debug("SWP{B} emulation: access caused memory abort!\n");
-	arm_notify_die("Illegal memory access", regs, &info, 0, 0);
+	arm_notify_die("Illegal memory access", regs,
+		       SIGSEGV, si_code,
+		       (void __user *)instruction_pointer(regs),
+		       0, 0);
 
 	abtcounter++;
 }
@@ -139,19 +126,14 @@ static int emulate_swpX(unsigned int address, unsigned int *data,
 
 	while (1) {
 		unsigned long temp;
+		unsigned int __ua_flags;
 
-		/*
-		 * Barrier required between accessing protected resource and
-		 * releasing a lock for it. Legacy code might not have done
-		 * this, and we cannot determine that this is not the case
-		 * being emulated, so insert always.
-		 */
-		smp_mb();
-
+		__ua_flags = uaccess_save_and_enable();
 		if (type == TYPE_SWPB)
 			__user_swpb_asm(*data, address, res, temp);
 		else
 			__user_swp_asm(*data, address, res, temp);
+		uaccess_restore(__ua_flags);
 
 		if (likely(res != -EAGAIN) || signal_pending(current))
 			break;
@@ -160,13 +142,6 @@ static int emulate_swpX(unsigned int address, unsigned int *data,
 	}
 
 	if (res == 0) {
-		/*
-		 * Barrier also required between acquiring a lock for a
-		 * protected resource and accessing the resource. Inserted for
-		 * same reason as above.
-		 */
-		smp_mb();
-
 		if (type == TYPE_SWPB)
 			swpbcounter++;
 		else
@@ -174,57 +149,6 @@ static int emulate_swpX(unsigned int address, unsigned int *data,
 	}
 
 	return res;
-}
-
-static int check_condition(struct pt_regs *regs, unsigned int insn)
-{
-	unsigned int base_cond, neg, cond = 0;
-	unsigned int cpsr_z, cpsr_c, cpsr_n, cpsr_v;
-
-	cpsr_n = (regs->ARM_cpsr & PSR_N_BIT) ? 1 : 0;
-	cpsr_z = (regs->ARM_cpsr & PSR_Z_BIT) ? 1 : 0;
-	cpsr_c = (regs->ARM_cpsr & PSR_C_BIT) ? 1 : 0;
-	cpsr_v = (regs->ARM_cpsr & PSR_V_BIT) ? 1 : 0;
-
-	/* Upper 3 bits indicate condition, lower bit incicates negation */
-	base_cond = insn >> 29;
-	neg = insn & BIT(28) ? 1 : 0;
-
-	switch (base_cond) {
-	case 0x0:	/* equal */
-		cond = cpsr_z;
-		break;
-
-	case 0x1:	/* carry set */
-		cond = cpsr_c;
-		break;
-
-	case 0x2:	/* minus / negative */
-		cond = cpsr_n;
-		break;
-
-	case 0x3:	/* overflow */
-		cond = cpsr_v;
-		break;
-
-	case 0x4:	/* unsigned higher */
-		cond = (cpsr_c == 1) && (cpsr_z == 0);
-		break;
-
-	case 0x5:	/* signed greater / equal */
-		cond = (cpsr_n == cpsr_v);
-		break;
-
-	case 0x6:	/* signed greater */
-		cond = (cpsr_z == 0) && (cpsr_n == cpsr_v);
-		break;
-
-	case 0x7:	/* always */
-		cond = 1;
-		break;
-	};
-
-	return cond && !neg;
 }
 
 /*
@@ -260,12 +184,6 @@ static int swp_handler(struct pt_regs *regs, unsigned int instr)
 		previous_pid = current->pid;
 	}
 
-	/* Ignore the instruction if it fails its condition code check */
-	if (!check_condition(regs, instr)) {
-		regs->ARM_pc += 4;
-		return 0;
-	}
-
 	address = regs->uregs[EXTRACT_REG_NUM(instr, RN_OFFSET)];
 	data	= regs->uregs[EXTRACT_REG_NUM(instr, RT2_OFFSET)];
 	destreg = EXTRACT_REG_NUM(instr, RT_OFFSET);
@@ -277,7 +195,7 @@ static int swp_handler(struct pt_regs *regs, unsigned int instr)
 		 destreg, EXTRACT_REG_NUM(instr, RT2_OFFSET), data);
 
 	/* Check access in reasonable access range for both SWP and SWPB */
-	if (!access_ok(VERIFY_WRITE, (address & ~3), 4)) {
+	if (!access_ok((address & ~3), 4)) {
 		pr_debug("SWP{B} emulation: access to %p not allowed!\n",
 			 (void *)address);
 		res = -EFAULT;
@@ -322,18 +240,16 @@ static struct undef_hook swp_hook = {
  */
 static int __init swp_emulation_init(void)
 {
+	if (cpu_architecture() < CPU_ARCH_ARMv7)
+		return 0;
+
 #ifdef CONFIG_PROC_FS
-	struct proc_dir_entry *res;
-
-	res = create_proc_entry("cpu/swp_emulation", S_IRUGO, NULL);
-
-	if (!res)
+	if (!proc_create_single("cpu/swp_emulation", S_IRUGO, NULL,
+			proc_status_show))
 		return -ENOMEM;
-
-	res->read_proc = proc_read_status;
 #endif /* CONFIG_PROC_FS */
 
-	printk(KERN_NOTICE "Registering SWP/SWPB emulation handler\n");
+	pr_notice("Registering SWP/SWPB emulation handler\n");
 	register_undef_hook(&swp_hook);
 
 	return 0;

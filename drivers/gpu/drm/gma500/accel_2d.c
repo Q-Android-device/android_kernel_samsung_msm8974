@@ -1,19 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /**************************************************************************
  * Copyright (c) 2007-2011, Intel Corporation.
  * All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
  *
  * Intel funded Tungsten Graphics (http://www.tungstengraphics.com) to
  * develop this driver.
@@ -28,7 +16,6 @@
 #include <linux/tty.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
-#include <linux/fb.h>
 #include <linux/init.h>
 #include <linux/console.h>
 
@@ -252,10 +239,10 @@ static void psbfb_copyarea_accel(struct fb_info *info,
 	if (!fb)
 		return;
 
-	offset = psbfb->gtt->offset;
+	offset = to_gtt_range(fb->obj[0])->offset;
 	stride = fb->pitches[0];
 
-	switch (fb->depth) {
+	switch (fb->format->depth) {
 	case 8:
 		src_format = PSB_2D_SRC_332RGB;
 		dst_format = PSB_2D_DST_332RGB;
@@ -276,12 +263,12 @@ static void psbfb_copyarea_accel(struct fb_info *info,
 		break;
 	default:
 		/* software fallback */
-		cfb_copyarea(info, a);
+		drm_fb_helper_cfb_copyarea(info, a);
 		return;
 	}
 
 	if (!gma_power_begin(dev, false)) {
-		cfb_copyarea(info, a);
+		drm_fb_helper_cfb_copyarea(info, a);
 		return;
 	}
 	psb_accel_2d_copy(dev_priv,
@@ -308,7 +295,7 @@ void psbfb_copyarea(struct fb_info *info,
 	/* Avoid the 8 pixel erratum */
 	if (region->width == 8 || region->height == 8 ||
 		(info->flags & FBINFO_HWACCEL_DISABLED))
-		return cfb_copyarea(info, region);
+		return drm_fb_helper_cfb_copyarea(info, region);
 
 	psbfb_copyarea_accel(info, region);
 }
@@ -326,7 +313,7 @@ int psbfb_sync(struct fb_info *info)
 	struct psb_framebuffer *psbfb = &fbdev->pfb;
 	struct drm_device *dev = psbfb->base.dev;
 	struct drm_psb_private *dev_priv = dev->dev_private;
-	unsigned long _end = jiffies + DRM_HZ;
+	unsigned long _end = jiffies + HZ;
 	int busy = 0;
 	unsigned long flags;
 

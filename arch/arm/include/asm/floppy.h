@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  arch/arm/include/asm/floppy.h
  *
  *  Copyright (C) 1996-2000 Russell King
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  *  Note that we don't touch FLOPPY_DMA nor FLOPPY_IRQ here
  */
@@ -17,7 +14,7 @@
 
 #define fd_outb(val,port)			\
 	do {					\
-		if ((port) == FD_DOR)		\
+		if ((port) == (u32)FD_DOR)	\
 			fd_setdor((val));	\
 		else				\
 			outb((val),(port));	\
@@ -25,7 +22,7 @@
 
 #define fd_inb(port)		inb((port))
 #define fd_request_irq()	request_irq(IRQ_FLOPPYDISK,floppy_interrupt,\
-					    IRQF_DISABLED,"floppy",NULL)
+					    0,"floppy",NULL)
 #define fd_free_irq()		free_irq(IRQ_FLOPPYDISK,NULL)
 #define fd_disable_irq()	disable_irq(IRQ_FLOPPYDISK)
 #define fd_enable_irq()		enable_irq(IRQ_FLOPPYDISK)

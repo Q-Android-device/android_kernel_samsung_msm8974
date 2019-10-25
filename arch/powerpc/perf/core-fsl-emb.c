@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Performance event support - Freescale Embedded Performance Monitor
  *
  * Copyright 2008-2009 Paul Mackerras, IBM Corporation.
  * Copyright 2010 Freescale Semiconductor, Inc.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -42,7 +38,7 @@ static DEFINE_MUTEX(pmc_reserve_mutex);
 static inline int perf_intr_is_nmi(struct pt_regs *regs)
 {
 #ifdef __powerpc64__
-	return !regs->softe;
+	return (regs->softe & IRQS_DISABLED);
 #else
 	return 0;
 #endif
@@ -70,6 +66,12 @@ static unsigned long read_pmc(int idx)
 	case 3:
 		val = mfpmr(PMRN_PMC3);
 		break;
+	case 4:
+		val = mfpmr(PMRN_PMC4);
+		break;
+	case 5:
+		val = mfpmr(PMRN_PMC5);
+		break;
 	default:
 		printk(KERN_ERR "oops trying to read PMC%d\n", idx);
 		val = 0;
@@ -94,6 +96,12 @@ static void write_pmc(int idx, unsigned long val)
 		break;
 	case 3:
 		mtpmr(PMRN_PMC3, val);
+		break;
+	case 4:
+		mtpmr(PMRN_PMC4, val);
+		break;
+	case 5:
+		mtpmr(PMRN_PMC5, val);
 		break;
 	default:
 		printk(KERN_ERR "oops trying to write PMC%d\n", idx);
@@ -120,6 +128,12 @@ static void write_pmlca(int idx, unsigned long val)
 	case 3:
 		mtpmr(PMRN_PMLCA3, val);
 		break;
+	case 4:
+		mtpmr(PMRN_PMLCA4, val);
+		break;
+	case 5:
+		mtpmr(PMRN_PMLCA5, val);
+		break;
 	default:
 		printk(KERN_ERR "oops trying to write PMLCA%d\n", idx);
 	}
@@ -144,6 +158,12 @@ static void write_pmlcb(int idx, unsigned long val)
 		break;
 	case 3:
 		mtpmr(PMRN_PMLCB3, val);
+		break;
+	case 4:
+		mtpmr(PMRN_PMLCB4, val);
+		break;
+	case 5:
+		mtpmr(PMRN_PMLCB5, val);
 		break;
 	default:
 		printk(KERN_ERR "oops trying to write PMLCB%d\n", idx);
@@ -186,7 +206,7 @@ static void fsl_emb_pmu_disable(struct pmu *pmu)
 	unsigned long flags;
 
 	local_irq_save(flags);
-	cpuhw = &__get_cpu_var(cpu_hw_events);
+	cpuhw = this_cpu_ptr(&cpu_hw_events);
 
 	if (!cpuhw->disabled) {
 		cpuhw->disabled = 1;
@@ -225,7 +245,7 @@ static void fsl_emb_pmu_enable(struct pmu *pmu)
 	unsigned long flags;
 
 	local_irq_save(flags);
-	cpuhw = &__get_cpu_var(cpu_hw_events);
+	cpuhw = this_cpu_ptr(&cpu_hw_events);
 	if (!cpuhw->disabled)
 		goto out;
 
@@ -253,7 +273,7 @@ static int collect_events(struct perf_event *group, int max_count,
 		ctrs[n] = group;
 		n++;
 	}
-	list_for_each_entry(event, &group->sibling_list, group_entry) {
+	for_each_sibling_event(event, group) {
 		if (!is_software_event(event) &&
 		    event->state != PERF_EVENT_STATE_OFF) {
 			if (n >= max_count)
@@ -306,9 +326,11 @@ static int fsl_emb_pmu_add(struct perf_event *event, int flags)
 	}
 	local64_set(&event->hw.prev_count, val);
 
-	if (!(flags & PERF_EF_START)) {
+	if (unlikely(!(flags & PERF_EF_START))) {
 		event->hw.state = PERF_HES_STOPPED | PERF_HES_UPTODATE;
 		val = 0;
+	} else {
+		event->hw.state &= ~(PERF_HES_STOPPED | PERF_HES_UPTODATE);
 	}
 
 	write_pmc(i, val);
@@ -365,6 +387,7 @@ static void fsl_emb_pmu_del(struct perf_event *event, int flags)
 static void fsl_emb_pmu_start(struct perf_event *event, int ef_flags)
 {
 	unsigned long flags;
+	unsigned long val;
 	s64 left;
 
 	if (event->hw.idx < 0 || !event->hw.sample_period)
@@ -381,7 +404,10 @@ static void fsl_emb_pmu_start(struct perf_event *event, int ef_flags)
 
 	event->hw.state = 0;
 	left = local64_read(&event->hw.period_left);
-	write_pmc(event->hw.idx, left);
+	val = 0;
+	if (left < 0x80000000L)
+		val = 0x80000000L - left;
+	write_pmc(event->hw.idx, val);
 
 	perf_event_update_userpage(event);
 	perf_pmu_enable(event->pmu);
@@ -461,6 +487,12 @@ static int fsl_emb_pmu_event_init(struct perf_event *event)
 	int err;
 	int num_restricted;
 	int i;
+
+	if (ppmu->n_counter > MAX_HWEVENTS) {
+		WARN(1, "No. of perf counters (%d) is higher than max array size(%d)\n",
+			ppmu->n_counter, MAX_HWEVENTS);
+		ppmu->n_counter = MAX_HWEVENTS;
+	}
 
 	switch (event->attr.type) {
 	case PERF_TYPE_HARDWARE:
@@ -613,8 +645,7 @@ static void record_and_restart(struct perf_event *event, unsigned long val,
 	if (record) {
 		struct perf_sample_data data;
 
-		perf_sample_data_init(&data, 0);
-		data.period = event->hw.last_period;
+		perf_sample_data_init(&data, 0, event->hw.last_period);
 
 		if (perf_event_overflow(event, &data, regs))
 			fsl_emb_pmu_stop(event, 0);
@@ -624,7 +655,7 @@ static void record_and_restart(struct perf_event *event, unsigned long val,
 static void perf_event_interrupt(struct pt_regs *regs)
 {
 	int i;
-	struct cpu_hw_events *cpuhw = &__get_cpu_var(cpu_hw_events);
+	struct cpu_hw_events *cpuhw = this_cpu_ptr(&cpu_hw_events);
 	struct perf_event *event;
 	unsigned long val;
 	int found = 0;

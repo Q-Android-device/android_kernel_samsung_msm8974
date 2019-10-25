@@ -1,16 +1,15 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef IOPRIO_H
 #define IOPRIO_H
-#ifdef __KERNEL__
+
 #include <linux/sched.h>
+#include <linux/sched/rt.h>
 #include <linux/iocontext.h>
-#endif /* __KERNEL__ */
 
 /*
  * Gives us 8 prio classes with 13-bits of data for each class
  */
-#define IOPRIO_BITS		(16)
 #define IOPRIO_CLASS_SHIFT	(13)
-#ifdef __KERNEL__
 #define IOPRIO_PRIO_MASK	((1UL << IOPRIO_CLASS_SHIFT) - 1)
 
 #define IOPRIO_PRIO_CLASS(mask)	((mask) >> IOPRIO_CLASS_SHIFT)
@@ -18,7 +17,6 @@
 #define IOPRIO_PRIO_VALUE(class, data)	(((class) << IOPRIO_CLASS_SHIFT) | data)
 
 #define ioprio_valid(mask)	(IOPRIO_PRIO_CLASS((mask)) != IOPRIO_CLASS_NONE)
-#endif /* __KERNEL__ */
 
 /*
  * These are the io priority groups as implemented by CFQ. RT is the realtime
@@ -44,28 +42,15 @@ enum {
 	IOPRIO_WHO_USER,
 };
 
-#ifdef __KERNEL__
+/*
+ * Fallback BE priority
+ */
+#define IOPRIO_NORM	(4)
+
 /*
  * if process has set io priority explicitly, use that. if not, convert
  * the cpu scheduler nice value to an io priority
  */
-#define IOPRIO_NORM	(4)
-static inline int task_ioprio(struct io_context *ioc)
-{
-	if (ioprio_valid(ioc->ioprio))
-		return IOPRIO_PRIO_DATA(ioc->ioprio);
-
-	return IOPRIO_NORM;
-}
-
-static inline int task_ioprio_class(struct io_context *ioc)
-{
-	if (ioprio_valid(ioc->ioprio))
-		return IOPRIO_PRIO_CLASS(ioc->ioprio);
-
-	return IOPRIO_CLASS_BE;
-}
-
 static inline int task_nice_ioprio(struct task_struct *task)
 {
 	return (task_nice(task) + 20) / 5;
@@ -79,10 +64,23 @@ static inline int task_nice_ioclass(struct task_struct *task)
 {
 	if (task->policy == SCHED_IDLE)
 		return IOPRIO_CLASS_IDLE;
-	else if (task->policy == SCHED_FIFO || task->policy == SCHED_RR)
+	else if (task_is_realtime(task))
 		return IOPRIO_CLASS_RT;
 	else
 		return IOPRIO_CLASS_BE;
+}
+
+/*
+ * If the calling process has set an I/O priority, use that. Otherwise, return
+ * the default I/O priority.
+ */
+static inline int get_current_ioprio(void)
+{
+	struct io_context *ioc = current->io_context;
+
+	if (ioc)
+		return ioc->ioprio;
+	return IOPRIO_PRIO_VALUE(IOPRIO_CLASS_NONE, 0);
 }
 
 /*
@@ -92,5 +90,13 @@ extern int ioprio_best(unsigned short aprio, unsigned short bprio);
 
 extern int set_task_ioprio(struct task_struct *task, int ioprio);
 
-#endif /* __KERNEL__ */
-#endif /* IOPRIO_H */
+#ifdef CONFIG_BLOCK
+extern int ioprio_check_cap(int ioprio);
+#else
+static inline int ioprio_check_cap(int ioprio)
+{
+	return -ENOTBLK;
+}
+#endif /* CONFIG_BLOCK */
+
+#endif

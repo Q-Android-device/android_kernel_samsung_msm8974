@@ -1,29 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2004-2006 Freescale Semiconductor, Inc. All Rights Reserved.
  * Copyright (C) 2008 by Sascha Hauer <kernel@pengutronix.de>
  * Copyright (C) 2009 by Valentin Longchamp <valentin.longchamp@epfl.ch>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
- * MA 02110-1301, USA.
  */
 #include <linux/gpio.h>
 #include <linux/module.h>
 #include <linux/spinlock.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
-#include <mach/hardware.h>
-#include <mach/iomux-mx3.h>
+
+#include "hardware.h"
+#include "iomux-mx3.h"
 
 /*
  * IOMUX register (base) addresses
@@ -39,13 +27,15 @@ static DEFINE_SPINLOCK(gpio_mux_lock);
 
 #define IOMUX_REG_MASK (IOMUX_PADNUM_MASK & ~0x3)
 
-unsigned long mxc_pin_alloc_map[NB_PORTS * 32 / BITS_PER_LONG];
+static DECLARE_BITMAP(mxc_pin_alloc_map, NB_PORTS * 32);
 /*
  * set the mode for a IOMUX pin.
  */
-int mxc_iomux_mode(unsigned int pin_mode)
+void mxc_iomux_mode(unsigned int pin_mode)
 {
-	u32 field, l, mode, ret = 0;
+	u32 field;
+	u32 l;
+	u32 mode;
 	void __iomem *reg;
 
 	reg = IOMUXSW_MUX_CTL + (pin_mode & IOMUX_REG_MASK);
@@ -54,16 +44,13 @@ int mxc_iomux_mode(unsigned int pin_mode)
 
 	spin_lock(&gpio_mux_lock);
 
-	l = __raw_readl(reg);
+	l = imx_readl(reg);
 	l &= ~(0xff << (field * 8));
 	l |= mode << (field * 8);
-	__raw_writel(l, reg);
+	imx_writel(l, reg);
 
 	spin_unlock(&gpio_mux_lock);
-
-	return ret;
 }
-EXPORT_SYMBOL(mxc_iomux_mode);
 
 /*
  * This function configures the pad value for a IOMUX pin.
@@ -82,14 +69,13 @@ void mxc_iomux_set_pad(enum iomux_pins pin, u32 config)
 
 	spin_lock(&gpio_mux_lock);
 
-	l = __raw_readl(reg);
+	l = imx_readl(reg);
 	l &= ~(0x1ff << (field * 10));
 	l |= config << (field * 10);
-	__raw_writel(l, reg);
+	imx_writel(l, reg);
 
 	spin_unlock(&gpio_mux_lock);
 }
-EXPORT_SYMBOL(mxc_iomux_set_pad);
 
 /*
  * allocs a single pin:
@@ -101,7 +87,7 @@ int mxc_iomux_alloc_pin(unsigned int pin, const char *label)
 	unsigned pad = pin & IOMUX_PADNUM_MASK;
 
 	if (pad >= (PIN_MAX + 1)) {
-		printk(KERN_ERR "mxc_iomux: Attempt to request nonexistant pin %u for \"%s\"\n",
+		printk(KERN_ERR "mxc_iomux: Attempt to request nonexistent pin %u for \"%s\"\n",
 			pad, label ? label : "?");
 		return -EINVAL;
 	}
@@ -115,7 +101,6 @@ int mxc_iomux_alloc_pin(unsigned int pin, const char *label)
 
 	return 0;
 }
-EXPORT_SYMBOL(mxc_iomux_alloc_pin);
 
 int mxc_iomux_setup_multiple_pins(const unsigned int *pin_list, unsigned count,
 		const char *label)
@@ -136,7 +121,6 @@ setup_error:
 	mxc_iomux_release_multiple_pins(pin_list, i);
 	return ret;
 }
-EXPORT_SYMBOL(mxc_iomux_setup_multiple_pins);
 
 void mxc_iomux_release_pin(unsigned int pin)
 {
@@ -145,7 +129,6 @@ void mxc_iomux_release_pin(unsigned int pin)
 	if (pad < (PIN_MAX + 1))
 		clear_bit(pad, mxc_pin_alloc_map);
 }
-EXPORT_SYMBOL(mxc_iomux_release_pin);
 
 void mxc_iomux_release_multiple_pins(const unsigned int *pin_list, int count)
 {
@@ -157,7 +140,6 @@ void mxc_iomux_release_multiple_pins(const unsigned int *pin_list, int count)
 		p++;
 	}
 }
-EXPORT_SYMBOL(mxc_iomux_release_multiple_pins);
 
 /*
  * This function enables/disables the general purpose function for a particular
@@ -168,13 +150,12 @@ void mxc_iomux_set_gpr(enum iomux_gp_func gp, bool en)
 	u32 l;
 
 	spin_lock(&gpio_mux_lock);
-	l = __raw_readl(IOMUXGPR);
+	l = imx_readl(IOMUXGPR);
 	if (en)
 		l |= gp;
 	else
 		l &= ~gp;
 
-	__raw_writel(l, IOMUXGPR);
+	imx_writel(l, IOMUXGPR);
 	spin_unlock(&gpio_mux_lock);
 }
-EXPORT_SYMBOL(mxc_iomux_set_gpr);

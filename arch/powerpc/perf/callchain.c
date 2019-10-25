@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Performance counter callchain support - powerpc architecture code
  *
  * Copyright © 2009 Paul Mackerras, IBM Corporation.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -22,6 +18,7 @@
 #ifdef CONFIG_PPC64
 #include "../kernel/ppc32.h"
 #endif
+#include <asm/pte-walk.h>
 
 
 /*
@@ -35,7 +32,7 @@ static int valid_next_sp(unsigned long sp, unsigned long prev_sp)
 		return 0;		/* must be 16-byte aligned */
 	if (!validate_sp(sp, current, STACK_FRAME_OVERHEAD))
 		return 0;
-	if (sp >= prev_sp + STACK_FRAME_OVERHEAD)
+	if (sp >= prev_sp + STACK_FRAME_MIN_SIZE)
 		return 1;
 	/*
 	 * sp could decrease when we jump off an interrupt stack
@@ -47,7 +44,7 @@ static int valid_next_sp(unsigned long sp, unsigned long prev_sp)
 }
 
 void
-perf_callchain_kernel(struct perf_callchain_entry *entry, struct pt_regs *regs)
+perf_callchain_kernel(struct perf_callchain_entry_ctx *entry, struct pt_regs *regs)
 {
 	unsigned long sp, next_sp;
 	unsigned long next_ip;
@@ -57,7 +54,7 @@ perf_callchain_kernel(struct perf_callchain_entry *entry, struct pt_regs *regs)
 
 	lr = regs->link;
 	sp = regs->gpr[1];
-	perf_callchain_store(entry, regs->nip);
+	perf_callchain_store(entry, perf_instruction_pointer(regs));
 
 	if (!validate_sp(sp, current, STACK_FRAME_OVERHEAD))
 		return;
@@ -76,7 +73,7 @@ perf_callchain_kernel(struct perf_callchain_entry *entry, struct pt_regs *regs)
 			next_ip = regs->nip;
 			lr = regs->link;
 			level = 0;
-			perf_callchain_store(entry, PERF_CONTEXT_KERNEL);
+			perf_callchain_store_context(entry, PERF_CONTEXT_KERNEL);
 
 		} else {
 			if (level == 0)
@@ -111,41 +108,45 @@ perf_callchain_kernel(struct perf_callchain_entry *entry, struct pt_regs *regs)
  * interrupt context, so if the access faults, we read the page tables
  * to find which page (if any) is mapped and access it directly.
  */
-static int read_user_stack_slow(void __user *ptr, void *ret, int nb)
+static int read_user_stack_slow(void __user *ptr, void *buf, int nb)
 {
+	int ret = -EFAULT;
 	pgd_t *pgdir;
 	pte_t *ptep, pte;
 	unsigned shift;
 	unsigned long addr = (unsigned long) ptr;
 	unsigned long offset;
-	unsigned long pfn;
+	unsigned long pfn, flags;
 	void *kaddr;
 
 	pgdir = current->mm->pgd;
 	if (!pgdir)
 		return -EFAULT;
 
-	ptep = find_linux_pte_or_hugepte(pgdir, addr, &shift);
+	local_irq_save(flags);
+	ptep = find_current_mm_pte(pgdir, addr, NULL, &shift);
+	if (!ptep)
+		goto err_out;
 	if (!shift)
 		shift = PAGE_SHIFT;
 
 	/* align address to page boundary */
 	offset = addr & ((1UL << shift) - 1);
-	addr -= offset;
 
-	if (ptep == NULL)
-		return -EFAULT;
-	pte = *ptep;
-	if (!pte_present(pte) || !(pte_val(pte) & _PAGE_USER))
-		return -EFAULT;
+	pte = READ_ONCE(*ptep);
+	if (!pte_present(pte) || !pte_user(pte))
+		goto err_out;
 	pfn = pte_pfn(pte);
 	if (!page_is_ram(pfn))
-		return -EFAULT;
+		goto err_out;
 
 	/* no highmem to worry about here */
 	kaddr = pfn_to_kaddr(pfn);
-	memcpy(ret, kaddr + offset, nb);
-	return 0;
+	memcpy(buf, kaddr + offset, nb);
+	ret = 0;
+err_out:
+	local_irq_restore(flags);
+	return ret;
 }
 
 static int read_user_stack_64(unsigned long __user *ptr, unsigned long *ret)
@@ -228,7 +229,7 @@ static int sane_signal_64_frame(unsigned long sp)
 		puc == (unsigned long) &sf->uc;
 }
 
-static void perf_callchain_user_64(struct perf_callchain_entry *entry,
+static void perf_callchain_user_64(struct perf_callchain_entry_ctx *entry,
 				   struct pt_regs *regs)
 {
 	unsigned long sp, next_sp;
@@ -238,12 +239,12 @@ static void perf_callchain_user_64(struct perf_callchain_entry *entry,
 	struct signal_frame_64 __user *sigframe;
 	unsigned long __user *fp, *uregs;
 
-	next_ip = regs->nip;
+	next_ip = perf_instruction_pointer(regs);
 	lr = regs->link;
 	sp = regs->gpr[1];
 	perf_callchain_store(entry, next_ip);
 
-	while (entry->nr < PERF_MAX_STACK_DEPTH) {
+	while (entry->nr < entry->max_stack) {
 		fp = (unsigned long __user *) sp;
 		if (!valid_user_sp(sp, 1) || read_user_stack_64(fp, &next_sp))
 			return;
@@ -270,7 +271,7 @@ static void perf_callchain_user_64(struct perf_callchain_entry *entry,
 			    read_user_stack_64(&uregs[PT_R1], &sp))
 				return;
 			level = 0;
-			perf_callchain_store(entry, PERF_CONTEXT_USER);
+			perf_callchain_store_context(entry, PERF_CONTEXT_USER);
 			perf_callchain_store(entry, next_ip);
 			continue;
 		}
@@ -315,7 +316,7 @@ static int read_user_stack_32(unsigned int __user *ptr, unsigned int *ret)
 	return rc;
 }
 
-static inline void perf_callchain_user_64(struct perf_callchain_entry *entry,
+static inline void perf_callchain_user_64(struct perf_callchain_entry_ctx *entry,
 					  struct pt_regs *regs)
 {
 }
@@ -435,7 +436,7 @@ static unsigned int __user *signal_frame_32_regs(unsigned int sp,
 	return mctx->mc_gregs;
 }
 
-static void perf_callchain_user_32(struct perf_callchain_entry *entry,
+static void perf_callchain_user_32(struct perf_callchain_entry_ctx *entry,
 				   struct pt_regs *regs)
 {
 	unsigned int sp, next_sp;
@@ -444,12 +445,12 @@ static void perf_callchain_user_32(struct perf_callchain_entry *entry,
 	long level = 0;
 	unsigned int __user *fp, *uregs;
 
-	next_ip = regs->nip;
+	next_ip = perf_instruction_pointer(regs);
 	lr = regs->link;
 	sp = regs->gpr[1];
 	perf_callchain_store(entry, next_ip);
 
-	while (entry->nr < PERF_MAX_STACK_DEPTH) {
+	while (entry->nr < entry->max_stack) {
 		fp = (unsigned int __user *) (unsigned long) sp;
 		if (!valid_user_sp(sp, 0) || read_user_stack_32(fp, &next_sp))
 			return;
@@ -469,7 +470,7 @@ static void perf_callchain_user_32(struct perf_callchain_entry *entry,
 			    read_user_stack_32(&uregs[PT_R1], &sp))
 				return;
 			level = 0;
-			perf_callchain_store(entry, PERF_CONTEXT_USER);
+			perf_callchain_store_context(entry, PERF_CONTEXT_USER);
 			perf_callchain_store(entry, next_ip);
 			continue;
 		}
@@ -483,7 +484,7 @@ static void perf_callchain_user_32(struct perf_callchain_entry *entry,
 }
 
 void
-perf_callchain_user(struct perf_callchain_entry *entry, struct pt_regs *regs)
+perf_callchain_user(struct perf_callchain_entry_ctx *entry, struct pt_regs *regs)
 {
 	if (current_is_64bit())
 		perf_callchain_user_64(entry, regs);

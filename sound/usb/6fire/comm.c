@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Linux driver for TerraTec DMX 6Fire USB
  *
@@ -6,11 +7,6 @@
  * Author:	Torsten Schenk <torsten.schenk@zoho.com>
  * Created:	Jan 01, 2011
  * Copyright:	(C) Torsten Schenk
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include "comm.h"
@@ -51,7 +47,7 @@ static void usb6fire_comm_receiver_handler(struct urb *urb)
 		urb->status = 0;
 		urb->actual_length = 0;
 		if (usb_submit_urb(urb, GFP_ATOMIC) < 0)
-			snd_printk(KERN_WARNING PREFIX
+			dev_warn(&urb->dev->dev,
 					"comm data receiver aborted.\n");
 	}
 }
@@ -143,11 +139,11 @@ static int usb6fire_comm_write16(struct comm_runtime *rt, u8 request,
 	return ret;
 }
 
-int __devinit usb6fire_comm_init(struct sfire_chip *chip)
+int usb6fire_comm_init(struct sfire_chip *chip)
 {
 	struct comm_runtime *rt = kzalloc(sizeof(struct comm_runtime),
 			GFP_KERNEL);
-	struct urb *urb = &rt->receiver;
+	struct urb *urb;
 	int ret;
 
 	if (!rt)
@@ -159,6 +155,7 @@ int __devinit usb6fire_comm_init(struct sfire_chip *chip)
 		return -ENOMEM;
 	}
 
+	urb = &rt->receiver;
 	rt->serial = 1;
 	rt->chip = chip;
 	usb_init_urb(urb);
@@ -178,7 +175,7 @@ int __devinit usb6fire_comm_init(struct sfire_chip *chip)
 	if (ret < 0) {
 		kfree(rt->receiver_buffer);
 		kfree(rt);
-		snd_printk(KERN_ERR PREFIX "cannot create comm data receiver.");
+		dev_err(&chip->dev->dev, "cannot create comm data receiver.");
 		return ret;
 	}
 	chip->comm = rt;

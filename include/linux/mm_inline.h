@@ -1,11 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef LINUX_MM_INLINE_H
 #define LINUX_MM_INLINE_H
 
 #include <linux/huge_mm.h>
 #include <linux/swap.h>
-#ifdef CONFIG_SCFS_LOWER_PAGECACHE_INVALIDATION
-#include <linux/page-flags.h>
-#endif
 
 /**
  * page_is_file_cache - should the page be on a file LRU or anon LRU?
@@ -25,39 +23,46 @@ static inline int page_is_file_cache(struct page *page)
 	return !PageSwapBacked(page);
 }
 
-static inline void
-add_page_to_lru_list(struct zone *zone, struct page *page, enum lru_list lru)
+static __always_inline void __update_lru_size(struct lruvec *lruvec,
+				enum lru_list lru, enum zone_type zid,
+				int nr_pages)
 {
-	struct lruvec *lruvec;
+	struct pglist_data *pgdat = lruvec_pgdat(lruvec);
 
-	lruvec = mem_cgroup_lru_add_list(zone, page, lru);
-#ifdef CONFIG_SCFS_LOWER_PAGECACHE_INVALIDATION
-	if (PageNocache(page))
-		list_add_tail(&page->lru, &lruvec->lists[lru]);
-	else
-		list_add(&page->lru, &lruvec->lists[lru]);
-#else
-	list_add(&page->lru, &lruvec->lists[lru]);
-#endif
-	__mod_zone_page_state(zone, NR_LRU_BASE + lru, hpage_nr_pages(page));
+	__mod_lruvec_state(lruvec, NR_LRU_BASE + lru, nr_pages);
+	__mod_zone_page_state(&pgdat->node_zones[zid],
+				NR_ZONE_LRU_BASE + lru, nr_pages);
+}
 
-#if defined(CONFIG_CMA_PAGE_COUNTING)
-	if (PageCMA(page))
-		__mod_zone_page_state(zone, NR_FREE_CMA_PAGES + 1 + lru, 1);
+static __always_inline void update_lru_size(struct lruvec *lruvec,
+				enum lru_list lru, enum zone_type zid,
+				int nr_pages)
+{
+	__update_lru_size(lruvec, lru, zid, nr_pages);
+#ifdef CONFIG_MEMCG
+	mem_cgroup_update_lru_size(lruvec, lru, zid, nr_pages);
 #endif
 }
 
-static inline void
-del_page_from_lru_list(struct zone *zone, struct page *page, enum lru_list lru)
+static __always_inline void add_page_to_lru_list(struct page *page,
+				struct lruvec *lruvec, enum lru_list lru)
 {
-	mem_cgroup_lru_del_list(page, lru);
-	list_del(&page->lru);
-	__mod_zone_page_state(zone, NR_LRU_BASE + lru, -hpage_nr_pages(page));
+	update_lru_size(lruvec, lru, page_zonenum(page), hpage_nr_pages(page));
+	list_add(&page->lru, &lruvec->lists[lru]);
+}
 
-#if defined(CONFIG_CMA_PAGE_COUNTING)
-	if (PageCMA(page))
-		__mod_zone_page_state(zone, NR_FREE_CMA_PAGES + 1 + lru, -1);
-#endif
+static __always_inline void add_page_to_lru_list_tail(struct page *page,
+				struct lruvec *lruvec, enum lru_list lru)
+{
+	update_lru_size(lruvec, lru, page_zonenum(page), hpage_nr_pages(page));
+	list_add_tail(&page->lru, &lruvec->lists[lru]);
+}
+
+static __always_inline void del_page_from_lru_list(struct page *page,
+				struct lruvec *lruvec, enum lru_list lru)
+{
+	list_del(&page->lru);
+	update_lru_size(lruvec, lru, page_zonenum(page), -hpage_nr_pages(page));
 }
 
 /**
@@ -82,7 +87,7 @@ static inline enum lru_list page_lru_base_type(struct page *page)
  * Returns the LRU list a page was on, as an index into the array of LRU
  * lists; and clears its Unevictable or Active flags, ready for freeing.
  */
-static inline enum lru_list page_off_lru(struct page *page)
+static __always_inline enum lru_list page_off_lru(struct page *page)
 {
 	enum lru_list lru;
 
@@ -106,7 +111,7 @@ static inline enum lru_list page_off_lru(struct page *page)
  * Returns the LRU list a page should be on, as an index
  * into the array of LRU lists.
  */
-static inline enum lru_list page_lru(struct page *page)
+static __always_inline enum lru_list page_lru(struct page *page)
 {
 	enum lru_list lru;
 
@@ -119,5 +124,4 @@ static inline enum lru_list page_lru(struct page *page)
 	}
 	return lru;
 }
-
 #endif

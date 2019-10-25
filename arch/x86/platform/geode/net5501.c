@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * System Specific setup for Soekris net5501
  * At the moment this means setup of GPIO control of LEDs and buttons
  * on net5501 boards.
- *
  *
  * Copyright (C) 2008-2009 Tower Technologies
  * Written by Alessandro Zummo <a.zummo@towertech.it>
@@ -10,17 +10,12 @@
  * Copyright (C) 2008 Constantin Baranov <const@mimas.ru>
  * Copyright (C) 2011 Ed Wildgoose <kernel@wildgooses.com>
  *                and Philip Prindeville <philipp@redfish-solutions.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/string.h>
-#include <linux/module.h>
 #include <linux/leds.h>
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
@@ -78,7 +73,7 @@ static struct platform_device net5501_leds_dev = {
 	.dev.platform_data = &net5501_leds_data,
 };
 
-static struct __initdata platform_device *net5501_devs[] = {
+static struct platform_device *net5501_devs[] __initdata = {
 	&net5501_buttons_dev,
 	&net5501_leds_dev,
 };
@@ -146,9 +141,4 @@ static int __init net5501_init(void)
 
 	return 0;
 }
-
-module_init(net5501_init);
-
-MODULE_AUTHOR("Philip Prindeville <philipp@redfish-solutions.com>");
-MODULE_DESCRIPTION("Soekris net5501 System Setup");
-MODULE_LICENSE("GPL");
+device_initcall(net5501_init);

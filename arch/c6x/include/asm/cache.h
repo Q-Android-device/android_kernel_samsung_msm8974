@@ -1,24 +1,27 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  Port on Texas Instruments TMS320C6x architecture
  *
- *  Copyright (C) 2005, 2006, 2009, 2010 Texas Instruments Incorporated
+ *  Copyright (C) 2005, 2006, 2009, 2010, 2012 Texas Instruments Incorporated
  *  Author: Aurelien Jacquiot (aurelien.jacquiot@jaluna.com)
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
  */
 #ifndef _ASM_C6X_CACHE_H
 #define _ASM_C6X_CACHE_H
 
 #include <linux/irqflags.h>
+#include <linux/init.h>
 
 /*
  * Cache line size
  */
-#define L1D_CACHE_BYTES   64
-#define L1P_CACHE_BYTES   32
-#define L2_CACHE_BYTES	  128
+#define L1D_CACHE_SHIFT   6
+#define L1D_CACHE_BYTES   (1 << L1D_CACHE_SHIFT)
+
+#define L1P_CACHE_SHIFT   5
+#define L1P_CACHE_BYTES   (1 << L1P_CACHE_SHIFT)
+
+#define L2_CACHE_SHIFT    7
+#define L2_CACHE_BYTES    (1 << L2_CACHE_SHIFT)
 
 /*
  * L2 used as cache
@@ -29,7 +32,8 @@
  * For practical reasons the L1_CACHE_BYTES defines should not be smaller than
  * the L2 line size
  */
-#define L1_CACHE_BYTES        L2_CACHE_BYTES
+#define L1_CACHE_SHIFT        L2_CACHE_SHIFT
+#define L1_CACHE_BYTES        (1 << L1_CACHE_SHIFT)
 
 #define L2_CACHE_ALIGN_LOW(x) \
 	(((x) & ~(L2_CACHE_BYTES - 1)))

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * f75375s.c - driver for the Fintek F75375/SP, F75373 and
  *             F75387SG/RG hardware monitoring features
@@ -13,21 +14,6 @@
  *
  * f75387:
  * http://www.fintek.com.tw/files/productfiles/F75387_V027P.pdf
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
- *
  */
 
 #include <linux/module.h>
@@ -275,7 +261,7 @@ static bool duty_mode_enabled(u8 pwm_enable)
 	case 3: /* Manual, speed mode */
 		return false;
 	default:
-		BUG();
+		WARN(1, "Unexpected pwm_enable value %d\n", pwm_enable);
 		return true;
 	}
 }
@@ -291,7 +277,7 @@ static bool auto_mode_enabled(u8 pwm_enable)
 	case 4: /* Auto, duty mode */
 		return true;
 	default:
-		BUG();
+		WARN(1, "Unexpected pwm_enable value %d\n", pwm_enable);
 		return false;
 	}
 }
@@ -359,7 +345,7 @@ static ssize_t set_pwm(struct device *dev, struct device_attribute *attr,
 		return -EINVAL;
 
 	mutex_lock(&data->update_lock);
-	data->pwm[nr] = SENSORS_LIMIT(val, 0, 255);
+	data->pwm[nr] = clamp_val(val, 0, 255);
 	f75375_write_pwm(client, nr);
 	mutex_unlock(&data->update_lock);
 	return count;
@@ -556,7 +542,7 @@ static ssize_t set_in_max(struct device *dev, struct device_attribute *attr,
 	if (err < 0)
 		return err;
 
-	val = SENSORS_LIMIT(VOLT_TO_REG(val), 0, 0xff);
+	val = clamp_val(VOLT_TO_REG(val), 0, 0xff);
 	mutex_lock(&data->update_lock);
 	data->in_max[nr] = val;
 	f75375_write8(client, F75375_REG_VOLT_HIGH(nr), data->in_max[nr]);
@@ -577,7 +563,7 @@ static ssize_t set_in_min(struct device *dev, struct device_attribute *attr,
 	if (err < 0)
 		return err;
 
-	val = SENSORS_LIMIT(VOLT_TO_REG(val), 0, 0xff);
+	val = clamp_val(VOLT_TO_REG(val), 0, 0xff);
 	mutex_lock(&data->update_lock);
 	data->in_min[nr] = val;
 	f75375_write8(client, F75375_REG_VOLT_LOW(nr), data->in_min[nr]);
@@ -625,7 +611,7 @@ static ssize_t set_temp_max(struct device *dev, struct device_attribute *attr,
 	if (err < 0)
 		return err;
 
-	val = SENSORS_LIMIT(TEMP_TO_REG(val), 0, 127);
+	val = clamp_val(TEMP_TO_REG(val), 0, 127);
 	mutex_lock(&data->update_lock);
 	data->temp_high[nr] = val;
 	f75375_write8(client, F75375_REG_TEMP_HIGH(nr), data->temp_high[nr]);
@@ -646,7 +632,7 @@ static ssize_t set_temp_max_hyst(struct device *dev,
 	if (err < 0)
 		return err;
 
-	val = SENSORS_LIMIT(TEMP_TO_REG(val), 0, 127);
+	val = clamp_val(TEMP_TO_REG(val), 0, 127);
 	mutex_lock(&data->update_lock);
 	data->temp_max_hyst[nr] = val;
 	f75375_write8(client, F75375_REG_TEMP_HYST(nr),
@@ -822,7 +808,7 @@ static void f75375_init(struct i2c_client *client, struct f75375_data *data,
 		if (auto_mode_enabled(f75375s_pdata->pwm_enable[nr]) ||
 		    !duty_mode_enabled(f75375s_pdata->pwm_enable[nr]))
 			continue;
-		data->pwm[nr] = SENSORS_LIMIT(f75375s_pdata->pwm[nr], 0, 255);
+		data->pwm[nr] = clamp_val(f75375s_pdata->pwm[nr], 0, 255);
 		f75375_write_pwm(client, nr);
 	}
 
@@ -832,13 +818,15 @@ static int f75375_probe(struct i2c_client *client,
 		const struct i2c_device_id *id)
 {
 	struct f75375_data *data;
-	struct f75375s_platform_data *f75375s_pdata = client->dev.platform_data;
+	struct f75375s_platform_data *f75375s_pdata =
+			dev_get_platdata(&client->dev);
 	int err;
 
 	if (!i2c_check_functionality(client->adapter,
 				I2C_FUNC_SMBUS_BYTE_DATA))
 		return -EIO;
-	data = kzalloc(sizeof(struct f75375_data), GFP_KERNEL);
+	data = devm_kzalloc(&client->dev, sizeof(struct f75375_data),
+			    GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
 
@@ -848,7 +836,7 @@ static int f75375_probe(struct i2c_client *client,
 
 	err = sysfs_create_group(&client->dev.kobj, &f75375_group);
 	if (err)
-		goto exit_free;
+		return err;
 
 	if (data->kind != f75373) {
 		err = sysfs_chmod_file(&client->dev.kobj,
@@ -875,8 +863,6 @@ static int f75375_probe(struct i2c_client *client,
 
 exit_remove:
 	sysfs_remove_group(&client->dev.kobj, &f75375_group);
-exit_free:
-	kfree(data);
 	return err;
 }
 
@@ -885,7 +871,6 @@ static int f75375_remove(struct i2c_client *client)
 	struct f75375_data *data = i2c_get_clientdata(client);
 	hwmon_device_unregister(data->hwmon_dev);
 	sysfs_remove_group(&client->dev.kobj, &f75375_group);
-	kfree(data);
 	return 0;
 }
 

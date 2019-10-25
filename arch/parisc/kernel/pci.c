@@ -45,14 +45,14 @@
  * #define pci_post_reset_delay 50
  */
 
-struct pci_port_ops *pci_port __read_mostly;
-struct pci_bios_ops *pci_bios __read_mostly;
+struct pci_port_ops *pci_port __ro_after_init;
+struct pci_bios_ops *pci_bios __ro_after_init;
 
-static int pci_hba_count __read_mostly;
+static int pci_hba_count __ro_after_init;
 
 /* parisc_pci_hba used by pci_port->in/out() ops to lookup bus data.  */
 #define PCI_HBA_MAX 32
-static struct pci_hba_data *parisc_pci_hba[PCI_HBA_MAX] __read_mostly;
+static struct pci_hba_data *parisc_pci_hba[PCI_HBA_MAX] __ro_after_init;
 
 
 /********************************************************************
@@ -139,11 +139,6 @@ void pcibios_fixup_bus(struct pci_bus *bus)
 }
 
 
-char *pcibios_setup(char *str)
-{
-	return str;
-}
-
 /*
  * Called by pci_set_master() - a driver interface.
  *
@@ -175,23 +170,31 @@ void pcibios_set_master(struct pci_dev *dev)
 			      (0x80 << 8) | pci_cache_line_size);
 }
 
-
-void __init pcibios_init_bus(struct pci_bus *bus)
+/*
+ * pcibios_init_bridge() initializes cache line and default latency
+ * for pci controllers and pci-pci bridges
+ */
+void __ref pcibios_init_bridge(struct pci_dev *dev)
 {
-	struct pci_dev *dev = bus->self;
-	unsigned short bridge_ctl;
+	unsigned short bridge_ctl, bridge_ctl_new;
 
 	/* We deal only with pci controllers and pci-pci bridges. */
 	if (!dev || (dev->class >> 8) != PCI_CLASS_BRIDGE_PCI)
 		return;
 
 	/* PCI-PCI bridge - set the cache line and default latency
-	   (32) for primary and secondary buses. */
+	 * (32) for primary and secondary buses.
+	 */
 	pci_write_config_byte(dev, PCI_SEC_LATENCY_TIMER, 32);
 
 	pci_read_config_word(dev, PCI_BRIDGE_CONTROL, &bridge_ctl);
-	bridge_ctl |= PCI_BRIDGE_CTL_PARITY | PCI_BRIDGE_CTL_SERR;
-	pci_write_config_word(dev, PCI_BRIDGE_CONTROL, bridge_ctl);
+
+	bridge_ctl_new = bridge_ctl | PCI_BRIDGE_CTL_PARITY |
+		PCI_BRIDGE_CTL_SERR | PCI_BRIDGE_CTL_MASTER_ABORT;
+	dev_info(&dev->dev, "Changing bridge control from 0x%08x to 0x%08x\n",
+		bridge_ctl, bridge_ctl_new);
+
+	pci_write_config_word(dev, PCI_BRIDGE_CONTROL, bridge_ctl_new);
 }
 
 /*
@@ -223,7 +226,6 @@ resource_size_t pcibios_align_resource(void *data, const struct resource *res,
 
 	return start;
 }
-
 
 /*
  * A driver is enabling the device.  We make sure that all the appropriate

@@ -1,7 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* ------------------------------------------------------------------------ *
  * i2c-parport-light.c I2C bus over parallel port                           *
  * ------------------------------------------------------------------------ *
-   Copyright (C) 2003-2010 Jean Delvare <khali@linux-fr.org>
+   Copyright (C) 2003-2010 Jean Delvare <jdelvare@suse.de>
 
    Based on older i2c-velleman.c driver
    Copyright (C) 1995-2000 Simon G. Vogl
@@ -9,19 +10,6 @@
    Frodo Looijaard <frodol@dds.nl>
    Kyösti Mälkki <kmalkki@cc.hut.fi>
 
-   This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; either version 2 of the License, or
-   (at your option) any later version.
-
-   This program is distributed in the hope that it will be useful,
-   but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
-
-   You should have received a copy of the GNU General Public License
-   along with this program; if not, write to the Free Software
-   Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  * ------------------------------------------------------------------------ */
 
 #include <linux/kernel.h>
@@ -42,11 +30,11 @@
 static struct platform_device *pdev;
 
 static u16 base;
-module_param(base, ushort, 0);
+module_param_hw(base, ushort, ioport, 0);
 MODULE_PARM_DESC(base, "Base I/O address");
 
 static int irq;
-module_param(irq, int, 0);
+module_param_hw(irq, int, irq, 0);
 MODULE_PARM_DESC(irq, "IRQ (optional)");
 
 /* ----- Low-level parallel port access ----------------------------------- */
@@ -127,7 +115,6 @@ static struct i2c_adapter parport_adapter = {
 
 /* SMBus alert support */
 static struct i2c_smbus_alert_setup alert_data = {
-	.alert_edge_triggered	= 1,
 };
 static struct i2c_client *ara;
 static struct lineop parport_ctrl_irq = {
@@ -135,7 +122,7 @@ static struct lineop parport_ctrl_irq = {
 	.port		= PORT_CTRL,
 };
 
-static int __devinit i2c_parport_probe(struct platform_device *pdev)
+static int i2c_parport_probe(struct platform_device *pdev)
 {
 	int err;
 
@@ -169,7 +156,7 @@ static int __devinit i2c_parport_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int __devexit i2c_parport_remove(struct platform_device *pdev)
+static int i2c_parport_remove(struct platform_device *pdev)
 {
 	if (ara) {
 		line_set(0, &parport_ctrl_irq);
@@ -187,11 +174,10 @@ static int __devexit i2c_parport_remove(struct platform_device *pdev)
 
 static struct platform_driver i2c_parport_driver = {
 	.driver = {
-		.owner	= THIS_MODULE,
 		.name	= DRVNAME,
 	},
 	.probe		= i2c_parport_probe,
-	.remove		= __devexit_p(i2c_parport_remove),
+	.remove		= i2c_parport_remove,
 };
 
 static int __init i2c_parport_device_add(u16 address)
@@ -273,7 +259,7 @@ static void __exit i2c_parport_exit(void)
 	release_region(base, 3);
 }
 
-MODULE_AUTHOR("Jean Delvare <khali@linux-fr.org>");
+MODULE_AUTHOR("Jean Delvare <jdelvare@suse.de>");
 MODULE_DESCRIPTION("I2C bus over parallel port (light)");
 MODULE_LICENSE("GPL");
 

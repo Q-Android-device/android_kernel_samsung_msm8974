@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/arch/arm/mach-pxa/icontrol.c
  *
@@ -7,10 +8,6 @@
  * Copyright (C) 2009 TMT Services & Supplies (Pty) Ltd.
  *
  * 2010-01-21 Hennie van der Merve <hvdmerwe@tmtservies.co.za>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/irq.h>
@@ -20,12 +17,13 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 
-#include <mach/pxa320.h>
-#include <mach/mxm8x10.h>
+#include "pxa320.h"
+#include "mxm8x10.h"
 
 #include <linux/spi/spi.h>
 #include <linux/spi/pxa2xx_spi.h>
 #include <linux/can/platform/mcp251x.h>
+#include <linux/regulator/machine.h>
 
 #include "generic.h"
 
@@ -73,9 +71,6 @@ static struct pxa2xx_spi_chip mcp251x_chip_info4 = {
 
 static struct mcp251x_platform_data mcp251x_info = {
 	.oscillator_frequency = 16E6,
-	.board_specific_setup = NULL,
-	.power_enable         = NULL,
-	.transceiver_enable   = NULL
 };
 
 static struct spi_board_info mcp251x_board_info[] = {
@@ -117,14 +112,12 @@ static struct spi_board_info mcp251x_board_info[] = {
 	}
 };
 
-static struct pxa2xx_spi_master pxa_ssp3_spi_master_info = {
-	.clock_enable   = CKEN_SSP3,
+static struct pxa2xx_spi_controller pxa_ssp3_spi_master_info = {
 	.num_chipselect = 2,
 	.enable_dma     = 1
 };
 
-static struct pxa2xx_spi_master pxa_ssp4_spi_master_info = {
-	.clock_enable   = CKEN_SSP4,
+static struct pxa2xx_spi_controller pxa_ssp4_spi_master_info = {
 	.num_chipselect = 2,
 	.enable_dma     = 1
 };
@@ -188,6 +181,8 @@ static void __init icontrol_init(void)
 	mxm_8x10_mmc_init();
 
 	icontrol_can_init();
+
+	regulator_has_full_constraints();
 }
 
 MACHINE_START(ICONTROL, "iControl/SafeTcam boards using Embedian MXM-8x10 CoM")
@@ -196,7 +191,7 @@ MACHINE_START(ICONTROL, "iControl/SafeTcam boards using Embedian MXM-8x10 CoM")
 	.nr_irqs	= PXA_NR_IRQS,
 	.init_irq	= pxa3xx_init_irq,
 	.handle_irq	= pxa3xx_handle_irq,
-	.timer		= &pxa_timer,
+	.init_time	= pxa_timer_init,
 	.init_machine	= icontrol_init,
 	.restart	= pxa_restart,
 MACHINE_END

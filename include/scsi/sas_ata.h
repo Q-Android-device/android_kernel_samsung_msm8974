@@ -1,25 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Support for SATA devices on Serial Attached SCSI (SAS) controllers
  *
  * Copyright (C) 2006 IBM Corporation
  *
  * Written by: Darrick J. Wong <djwong@us.ibm.com>, IBM Corporation
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
- * USA
- *
  */
 
 #ifndef _SAS_ATA_H_
@@ -32,8 +17,8 @@
 
 static inline int dev_is_sata(struct domain_device *dev)
 {
-	return dev->dev_type == SATA_DEV || dev->dev_type == SATA_PM ||
-	       dev->dev_type == SATA_PM_PORT || dev->dev_type == SATA_PENDING;
+	return dev->dev_type == SAS_SATA_DEV || dev->dev_type == SAS_SATA_PM ||
+	       dev->dev_type == SAS_SATA_PM_PORT || dev->dev_type == SAS_SATA_PENDING;
 }
 
 int sas_get_ata_info(struct domain_device *dev, struct ex_phy *phy);
@@ -45,6 +30,9 @@ void sas_ata_eh(struct Scsi_Host *shost, struct list_head *work_q,
 void sas_ata_schedule_reset(struct domain_device *dev);
 void sas_ata_wait_eh(struct domain_device *dev);
 void sas_probe_sata(struct asd_sas_port *port);
+void sas_suspend_sata(struct asd_sas_port *port);
+void sas_resume_sata(struct asd_sas_port *port);
+void sas_ata_end_eh(struct ata_port *ap);
 #else
 
 
@@ -81,9 +69,21 @@ static inline void sas_probe_sata(struct asd_sas_port *port)
 {
 }
 
+static inline void sas_suspend_sata(struct asd_sas_port *port)
+{
+}
+
+static inline void sas_resume_sata(struct asd_sas_port *port)
+{
+}
+
 static inline int sas_get_ata_info(struct domain_device *dev, struct ex_phy *phy)
 {
 	return 0;
+}
+
+static inline void sas_ata_end_eh(struct ata_port *ap)
+{
 }
 #endif
 

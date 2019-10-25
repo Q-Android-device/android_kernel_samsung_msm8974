@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * GE IMP3A Board Setup
  *
  * Author Martyn Welch <martyn.welch@ge.com>
  *
  * Copyright 2010 GE Intelligent Platforms Embedded Systems, Inc.
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  *
  * Based on: mpc85xx_ds.c (MPC85xx DS Board Setup)
  * Copyright 2007 Freescale Semiconductor Inc.
@@ -22,7 +18,6 @@
 #include <linux/seq_file.h>
 #include <linux/interrupt.h>
 #include <linux/of_platform.h>
-#include <linux/memblock.h>
 
 #include <asm/time.h>
 #include <asm/machdep.h>
@@ -48,9 +43,8 @@ void __init ge_imp3a_pic_init(void)
 	struct mpic *mpic;
 	struct device_node *np;
 	struct device_node *cascade_node = NULL;
-	unsigned long root = of_get_flat_dt_root();
 
-	if (of_flat_dt_is_compatible(root, "fsl,MPC8572DS-CAMP")) {
+	if (of_machine_is_compatible("fsl,MPC8572DS-CAMP")) {
 		mpic = mpic_alloc(NULL, 0,
 			MPIC_NO_RESET |
 			MPIC_BIG_ENDIAN |
@@ -84,9 +78,23 @@ void __init ge_imp3a_pic_init(void)
 	of_node_put(cascade_node);
 }
 
+static void ge_imp3a_pci_assign_primary(void)
+{
 #ifdef CONFIG_PCI
-static int primary_phb_addr;
-#endif	/* CONFIG_PCI */
+	struct device_node *np;
+	struct resource rsrc;
+
+	for_each_node_by_type(np, "pci") {
+		if (of_device_is_compatible(np, "fsl,mpc8540-pci") ||
+		    of_device_is_compatible(np, "fsl,mpc8548-pcie") ||
+		    of_device_is_compatible(np, "fsl,p2020-pcie")) {
+			of_address_to_resource(np, 0, &rsrc);
+			if ((rsrc.start & 0xfffff) == 0x9000)
+				fsl_pci_primary = np;
+		}
+	}
+#endif
+}
 
 /*
  * Setup the architecture
@@ -94,43 +102,15 @@ static int primary_phb_addr;
 static void __init ge_imp3a_setup_arch(void)
 {
 	struct device_node *regs;
-#ifdef CONFIG_PCI
-	struct device_node *np;
-	struct pci_controller *hose;
-#endif
-	dma_addr_t max = 0xffffffff;
 
 	if (ppc_md.progress)
 		ppc_md.progress("ge_imp3a_setup_arch()", 0);
 
-#ifdef CONFIG_PCI
-	for_each_node_by_type(np, "pci") {
-		if (of_device_is_compatible(np, "fsl,mpc8540-pci") ||
-		    of_device_is_compatible(np, "fsl,mpc8548-pcie") ||
-		    of_device_is_compatible(np, "fsl,p2020-pcie")) {
-			struct resource rsrc;
-			of_address_to_resource(np, 0, &rsrc);
-			if ((rsrc.start & 0xfffff) == primary_phb_addr)
-				fsl_add_bridge(np, 1);
-			else
-				fsl_add_bridge(np, 0);
-
-			hose = pci_find_hose_for_OF_device(np);
-			max = min(max, hose->dma_window_base_cur +
-					hose->dma_window_size);
-		}
-	}
-#endif
-
 	mpc85xx_smp_init();
 
-#ifdef CONFIG_SWIOTLB
-	if (memblock_end_of_DRAM() > max) {
-		ppc_swiotlb_enable = 1;
-		set_pci_dma_ops(&swiotlb_dma_ops);
-		ppc_md.pci_dma_dev_setup = pci_dma_dev_setup_swiotlb;
-	}
-#endif
+	ge_imp3a_pci_assign_primary();
+
+	swiotlb_detect_4g();
 
 	/* Remap basic board registers */
 	regs = of_find_compatible_node(NULL, NULL, "ge,imp3a-fpga-regs");
@@ -213,21 +193,10 @@ static void ge_imp3a_show_cpuinfo(struct seq_file *m)
  */
 static int __init ge_imp3a_probe(void)
 {
-	unsigned long root = of_get_flat_dt_root();
-
-	if (of_flat_dt_is_compatible(root, "ge,IMP3A")) {
-#ifdef CONFIG_PCI
-		primary_phb_addr = 0x9000;
-#endif
-		return 1;
-	}
-
-	return 0;
+	return of_machine_is_compatible("ge,IMP3A");
 }
 
-machine_device_initcall(ge_imp3a, mpc85xx_common_publish_devices);
-
-machine_arch_initcall(ge_imp3a, swiotlb_setup_bus_notifier);
+machine_arch_initcall(ge_imp3a, mpc85xx_common_publish_devices);
 
 define_machine(ge_imp3a) {
 	.name			= "GE_IMP3A",
@@ -237,9 +206,9 @@ define_machine(ge_imp3a) {
 	.show_cpuinfo		= ge_imp3a_show_cpuinfo,
 #ifdef CONFIG_PCI
 	.pcibios_fixup_bus	= fsl_pcibios_fixup_bus,
+	.pcibios_fixup_phb      = fsl_pcibios_fixup_phb,
 #endif
 	.get_irq		= mpic_get_irq,
-	.restart		= fsl_rstcr_restart,
 	.calibrate_decr		= generic_calibrate_decr,
 	.progress		= udbg_progress,
 };

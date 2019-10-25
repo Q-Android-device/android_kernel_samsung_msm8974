@@ -13,6 +13,7 @@
 
 #ifndef __ASSEMBLY__
 
+#include <linux/bits.h>
 #include <linux/stringify.h>
 
 /*
@@ -22,17 +23,47 @@
 static inline unsigned long
 __cmpxchg_u32(volatile int *p, int old, int new)
 {
-  __asm__ __volatile__("rsil    a15, "__stringify(LOCKLEVEL)"\n\t"
-		       "l32i    %0, %1, 0              \n\t"
-		       "bne	%0, %2, 1f             \n\t"
-		       "s32i    %3, %1, 0              \n\t"
-		       "1:                             \n\t"
-		       "wsr     a15, "__stringify(PS)" \n\t"
-		       "rsync                          \n\t"
-		       : "=&a" (old)
-		       : "a" (p), "a" (old), "r" (new)
-		       : "a15", "memory");
-  return old;
+#if XCHAL_HAVE_EXCLUSIVE
+	unsigned long tmp, result;
+
+	__asm__ __volatile__(
+			"1:     l32ex   %0, %3\n"
+			"       bne     %0, %4, 2f\n"
+			"       mov     %1, %2\n"
+			"       s32ex   %1, %3\n"
+			"       getex   %1\n"
+			"       beqz    %1, 1b\n"
+			"2:\n"
+			: "=&a" (result), "=&a" (tmp)
+			: "a" (new), "a" (p), "a" (old)
+			: "memory"
+			);
+
+	return result;
+#elif XCHAL_HAVE_S32C1I
+	__asm__ __volatile__(
+			"       wsr     %2, scompare1\n"
+			"       s32c1i  %0, %1, 0\n"
+			: "+a" (new)
+			: "a" (p), "a" (old)
+			: "memory"
+			);
+
+	return new;
+#else
+	__asm__ __volatile__(
+			"       rsil    a15, "__stringify(TOPLEVEL)"\n"
+			"       l32i    %0, %1, 0\n"
+			"       bne     %0, %2, 1f\n"
+			"       s32i    %3, %1, 0\n"
+			"1:\n"
+			"       wsr     a15, ps\n"
+			"       rsync\n"
+			: "=&a" (old)
+			: "a" (p), "a" (old), "r" (new)
+			: "a15", "memory");
+	return old;
+#endif
 }
 /* This function doesn't exist, so you'll get a linker error
  * if something tries to do an invalid cmpxchg(). */
@@ -80,6 +111,7 @@ static inline unsigned long __cmpxchg_local(volatile void *ptr,
 	((__typeof__(*(ptr)))__cmpxchg_local_generic((ptr), (unsigned long)(o),\
 			(unsigned long)(n), sizeof(*(ptr))))
 #define cmpxchg64_local(ptr, o, n) __cmpxchg64_local_generic((ptr), (o), (n))
+#define cmpxchg64(ptr, o, n)    cmpxchg64_local((ptr), (o), (n))
 
 /*
  * xchg_u32
@@ -93,19 +125,73 @@ static inline unsigned long __cmpxchg_local(volatile void *ptr,
 
 static inline unsigned long xchg_u32(volatile int * m, unsigned long val)
 {
-  unsigned long tmp;
-  __asm__ __volatile__("rsil    a15, "__stringify(LOCKLEVEL)"\n\t"
-		       "l32i    %0, %1, 0              \n\t"
-		       "s32i    %2, %1, 0              \n\t"
-		       "wsr     a15, "__stringify(PS)" \n\t"
-		       "rsync                          \n\t"
-		       : "=&a" (tmp)
-		       : "a" (m), "a" (val)
-		       : "a15", "memory");
-  return tmp;
+#if XCHAL_HAVE_EXCLUSIVE
+	unsigned long tmp, result;
+
+	__asm__ __volatile__(
+			"1:     l32ex   %0, %3\n"
+			"       mov     %1, %2\n"
+			"       s32ex   %1, %3\n"
+			"       getex   %1\n"
+			"       beqz    %1, 1b\n"
+			: "=&a" (result), "=&a" (tmp)
+			: "a" (val), "a" (m)
+			: "memory"
+			);
+
+	return result;
+#elif XCHAL_HAVE_S32C1I
+	unsigned long tmp, result;
+	__asm__ __volatile__(
+			"1:     l32i    %1, %2, 0\n"
+			"       mov     %0, %3\n"
+			"       wsr     %1, scompare1\n"
+			"       s32c1i  %0, %2, 0\n"
+			"       bne     %0, %1, 1b\n"
+			: "=&a" (result), "=&a" (tmp)
+			: "a" (m), "a" (val)
+			: "memory"
+			);
+	return result;
+#else
+	unsigned long tmp;
+	__asm__ __volatile__(
+			"       rsil    a15, "__stringify(TOPLEVEL)"\n"
+			"       l32i    %0, %1, 0\n"
+			"       s32i    %2, %1, 0\n"
+			"       wsr     a15, ps\n"
+			"       rsync\n"
+			: "=&a" (tmp)
+			: "a" (m), "a" (val)
+			: "a15", "memory");
+	return tmp;
+#endif
 }
 
-#define xchg(ptr,x) ((__typeof__(*(ptr)))__xchg((unsigned long)(x),(ptr),sizeof(*(ptr))))
+#define xchg(ptr,x) \
+	((__typeof__(*(ptr)))__xchg((unsigned long)(x),(ptr),sizeof(*(ptr))))
+
+static inline u32 xchg_small(volatile void *ptr, u32 x, int size)
+{
+	int off = (unsigned long)ptr % sizeof(u32);
+	volatile u32 *p = ptr - off;
+#ifdef __BIG_ENDIAN
+	int bitoff = (sizeof(u32) - size - off) * BITS_PER_BYTE;
+#else
+	int bitoff = off * BITS_PER_BYTE;
+#endif
+	u32 bitmask = ((0x1 << size * BITS_PER_BYTE) - 1) << bitoff;
+	u32 oldv, newv;
+	u32 ret;
+
+	do {
+		oldv = READ_ONCE(*p);
+		ret = (oldv & bitmask) >> bitoff;
+		newv = (oldv & ~bitmask) | (x << bitoff);
+	} while (__cmpxchg_u32(p, oldv, newv) != oldv);
+
+	return ret;
+}
 
 /*
  * This only works if the compiler isn't horribly bad at optimizing.
@@ -119,11 +205,16 @@ static __inline__ unsigned long
 __xchg(unsigned long x, volatile void * ptr, int size)
 {
 	switch (size) {
-		case 4:
-			return xchg_u32(ptr, x);
+	case 1:
+		return xchg_small(ptr, x, 1);
+	case 2:
+		return xchg_small(ptr, x, 2);
+	case 4:
+		return xchg_u32(ptr, x);
+	default:
+		__xchg_called_with_bad_pointer();
+		return x;
 	}
-	__xchg_called_with_bad_pointer();
-	return x;
 }
 
 #endif /* __ASSEMBLY__ */

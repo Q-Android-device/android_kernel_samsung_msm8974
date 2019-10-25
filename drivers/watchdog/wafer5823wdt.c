@@ -178,7 +178,7 @@ static long wafwdt_ioctl(struct file *file, unsigned int cmd,
 		timeout = new_timeout;
 		wafwdt_stop();
 		wafwdt_start();
-		/* Fall */
+		/* Fall through */
 	case WDIOC_GETTIMEOUT:
 		return put_user(timeout, p);
 
@@ -197,7 +197,7 @@ static int wafwdt_open(struct inode *inode, struct file *file)
 	 *      Activate
 	 */
 	wafwdt_start();
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 static int wafwdt_close(struct inode *inode, struct file *file)
@@ -322,6 +322,5 @@ module_exit(wafwdt_exit);
 MODULE_AUTHOR("Justin Cormack");
 MODULE_DESCRIPTION("ICP Wafer 5823 Single Board Computer WDT driver");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);
 
 /* end of wafer5823wdt.c */

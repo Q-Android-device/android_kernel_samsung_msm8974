@@ -1,20 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * arch/arm/mach-netx/nxeb500hmi.c
  *
  * Copyright (c) 2005 Sascha Hauer <s.hauer@pengutronix.de>, Pengutronix
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/dma-mapping.h>
@@ -28,9 +16,8 @@
 #include <mach/hardware.h>
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
-#include <asm/hardware/vic.h>
 #include <mach/netx-regs.h>
-#include <mach/eth.h>
+#include <linux/platform_data/eth-netx.h>
 
 #include "generic.h"
 #include "fb.h"
@@ -181,8 +168,7 @@ MACHINE_START(NXEB500HMI, "Hilscher nxeb500hmi")
 	.atag_offset	= 0x100,
 	.map_io		= netx_map_io,
 	.init_irq	= netx_init_irq,
-	.handle_irq	= vic_handle_irq,
-	.timer		= &netx_timer,
+	.init_time	= netx_timer_init,
 	.init_machine	= nxeb500hmi_init,
 	.restart	= netx_restart,
 MACHINE_END

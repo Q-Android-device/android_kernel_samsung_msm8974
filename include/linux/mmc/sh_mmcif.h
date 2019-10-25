@@ -1,14 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * include/linux/mmc/sh_mmcif.h
  *
  * platform data for eMMC driver
  *
  * Copyright (C) 2010 Renesas Solutions Corp.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License.
- *
  */
 
 #ifndef LINUX_MMC_SH_MMCIF_H
@@ -16,7 +12,6 @@
 
 #include <linux/io.h>
 #include <linux/platform_device.h>
-#include <linux/sh_dma.h>
 
 /*
  * MMCIF : CE_CLK_CTRL [19:16]
@@ -32,17 +27,8 @@
  * 1111 : Peripheral clock (sup_pclk set '1')
  */
 
-struct sh_mmcif_dma {
-	struct sh_dmae_slave chan_priv_tx;
-	struct sh_dmae_slave chan_priv_rx;
-};
-
 struct sh_mmcif_plat_data {
-	void (*set_pwr)(struct platform_device *pdev, int state);
-	void (*down_pwr)(struct platform_device *pdev);
-	int (*get_cd)(struct platform_device *pdef);
-	struct sh_mmcif_dma	*dma;		/* Deprecated. Instead */
-	unsigned int		slave_id_tx;	/* use embedded slave_id_[tr]x */
+	unsigned int		slave_id_tx;	/* embedded slave_id_[tr]x */
 	unsigned int		slave_id_rx;
 	u8			sup_pclk;	/* 1 :SH7757, 0: SH7724/SH7372 */
 	unsigned long		caps;
@@ -66,6 +52,7 @@ struct sh_mmcif_plat_data {
 #define MMCIF_CE_INT_MASK	0x00000044
 #define MMCIF_CE_HOST_STS1	0x00000048
 #define MMCIF_CE_HOST_STS2	0x0000004C
+#define MMCIF_CE_CLK_CTRL2	0x00000070
 #define MMCIF_CE_VERSION	0x0000007C
 
 /* CE_BUF_ACC */

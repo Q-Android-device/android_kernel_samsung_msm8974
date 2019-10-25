@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * PCMCIA socket code for the MyCable XXS1500 system.
  *
@@ -11,6 +12,7 @@
 #include <linux/io.h>
 #include <linux/ioport.h>
 #include <linux/mm.h>
+#include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/pm.h>
 #include <linux/resource.h>
@@ -204,7 +206,7 @@ static struct pccard_operations xxs1500_pcmcia_operations = {
 	.set_mem_map		= au1x00_pcmcia_set_mem_map,
 };
 
-static int __devinit xxs1500_pcmcia_probe(struct platform_device *pdev)
+static int xxs1500_pcmcia_probe(struct platform_device *pdev)
 {
 	struct xxs1500_pcmcia_sock *sock;
 	struct resource *r;
@@ -299,7 +301,7 @@ out0:
 	return ret;
 }
 
-static int __devexit xxs1500_pcmcia_remove(struct platform_device *pdev)
+static int xxs1500_pcmcia_remove(struct platform_device *pdev)
 {
 	struct xxs1500_pcmcia_sock *sock = platform_get_drvdata(pdev);
 
@@ -314,10 +316,9 @@ static int __devexit xxs1500_pcmcia_remove(struct platform_device *pdev)
 static struct platform_driver xxs1500_pcmcia_socket_driver = {
 	.driver	= {
 		.name	= "xxs1500_pcmcia",
-		.owner	= THIS_MODULE,
 	},
 	.probe		= xxs1500_pcmcia_probe,
-	.remove		= __devexit_p(xxs1500_pcmcia_remove),
+	.remove		= xxs1500_pcmcia_remove,
 };
 
 module_platform_driver(xxs1500_pcmcia_socket_driver);

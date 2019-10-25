@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  board.c: STB225 board support.
  *
@@ -6,21 +7,7 @@
  *    Daniel Laird <daniel.j.laird@nxp.com>
  *
  *  Based on software written by:
- *      Nikita Youshchenko <yoush@debian.org>, based on PNX8550 code.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ *	Nikita Youshchenko <yoush@debian.org>, based on PNX8550 code.
  */
 #include <linux/init.h>
 #include <asm/bootinfo.h>
@@ -91,7 +78,7 @@ void __init pnx833x_board_setup(void)
 	pnx833x_gpio_select_function_alt(32);
 	pnx833x_gpio_select_function_alt(33);
 
-#if defined(CONFIG_MTD_NAND_PLATFORM) || defined(CONFIG_MTD_NAND_PLATFORM_MODULE)
+#if IS_ENABLED(CONFIG_MTD_NAND_PLATFORM)
 	/* Setup MIU for NAND access on CS0...
 	 *
 	 * (it seems that we must also configure CS1 for reliable operation,
@@ -117,7 +104,7 @@ void __init pnx833x_board_setup(void)
 	pnx833x_gpio_select_output(5);
 	pnx833x_gpio_write(1, 5);
 
-#elif defined(CONFIG_MTD_CFI) || defined(CONFIG_MTD_CFI_MODULE)
+#elif IS_ENABLED(CONFIG_MTD_CFI)
 
 	/* Set up MIU for 16-bit NOR access on CS0 and CS1... */
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Driver for SiS7019 Audio Accelerator
  *
@@ -6,19 +7,6 @@
  *  Inspired by the Trident 4D-WaveDX/NX driver.
  *
  *  All rights reserved.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, version 2.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/init.h>
@@ -52,7 +40,7 @@ MODULE_PARM_DESC(enable, "Enable SiS7019 Audio Accelerator.");
 module_param(codecs, int, 0444);
 MODULE_PARM_DESC(codecs, "Set bit to indicate that codec number is expected to be present (default 1)");
 
-static DEFINE_PCI_DEVICE_TABLE(snd_sis7019_ids) = {
+static const struct pci_device_id snd_sis7019_ids[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_SI, 0x7019) },
 	{ 0, }
 };
@@ -103,7 +91,7 @@ struct voice {
  * we're not doing power management, we still need to allocate a page
  * for the silence buffer.
  */
-#ifdef CONFIG_PM
+#ifdef CONFIG_PM_SLEEP
 #define SIS_SUSPEND_PAGES	4
 #else
 #define SIS_SUSPEND_PAGES	1
@@ -159,7 +147,7 @@ struct sis7019 {
  * We'll add a constraint upon open that limits the period and buffer sample
  * size to values that are legal for the hardware.
  */
-static struct snd_pcm_hardware sis_playback_hw_info = {
+static const struct snd_pcm_hardware sis_playback_hw_info = {
 	.info = (SNDRV_PCM_INFO_MMAP |
 		 SNDRV_PCM_INFO_MMAP_VALID |
 		 SNDRV_PCM_INFO_INTERLEAVED |
@@ -180,7 +168,7 @@ static struct snd_pcm_hardware sis_playback_hw_info = {
 	.periods_max = (0xfff9 / 9),
 };
 
-static struct snd_pcm_hardware sis_capture_hw_info = {
+static const struct snd_pcm_hardware sis_capture_hw_info = {
 	.info = (SNDRV_PCM_INFO_MMAP |
 		 SNDRV_PCM_INFO_MMAP_VALID |
 		 SNDRV_PCM_INFO_INTERLEAVED |
@@ -383,9 +371,9 @@ static void __sis_map_silence(struct sis7019 *sis)
 {
 	/* Helper function: must hold sis->voice_lock on entry */
 	if (!sis->silence_users)
-		sis->silence_dma_addr = pci_map_single(sis->pci,
+		sis->silence_dma_addr = dma_map_single(&sis->pci->dev,
 						sis->suspend_state[0],
-						4096, PCI_DMA_TODEVICE);
+						4096, DMA_TO_DEVICE);
 	sis->silence_users++;
 }
 
@@ -394,8 +382,8 @@ static void __sis_unmap_silence(struct sis7019 *sis)
 	/* Helper function: must hold sis->voice_lock on entry */
 	sis->silence_users--;
 	if (!sis->silence_users)
-		pci_unmap_single(sis->pci, sis->silence_dma_addr, 4096,
-					PCI_DMA_TODEVICE);
+		dma_unmap_single(&sis->pci->dev, sis->silence_dma_addr, 4096,
+					DMA_TO_DEVICE);
 }
 
 static void sis_free_voice(struct sis7019 *sis, struct voice *voice)
@@ -872,7 +860,7 @@ static int sis_pcm_capture_prepare(struct snd_pcm_substream *substream)
 	return 0;
 }
 
-static struct snd_pcm_ops sis_playback_ops = {
+static const struct snd_pcm_ops sis_playback_ops = {
 	.open = sis_playback_open,
 	.close = sis_substream_close,
 	.ioctl = snd_pcm_lib_ioctl,
@@ -883,7 +871,7 @@ static struct snd_pcm_ops sis_playback_ops = {
 	.pointer = sis_pcm_pointer,
 };
 
-static struct snd_pcm_ops sis_capture_ops = {
+static const struct snd_pcm_ops sis_capture_ops = {
 	.open = sis_capture_open,
 	.close = sis_substream_close,
 	.ioctl = snd_pcm_lib_ioctl,
@@ -894,7 +882,7 @@ static struct snd_pcm_ops sis_capture_ops = {
 	.pointer = sis_pcm_pointer,
 };
 
-static int __devinit sis_pcm_create(struct sis7019 *sis)
+static int sis_pcm_create(struct sis7019 *sis)
 {
 	struct snd_pcm *pcm;
 	int rc;
@@ -1013,7 +1001,7 @@ static unsigned short sis_ac97_read(struct snd_ac97 *ac97, unsigned short reg)
 					(reg << 8) | cmd[ac97->num]);
 }
 
-static int __devinit sis_mixer_create(struct sis7019 *sis)
+static int sis_mixer_create(struct sis7019 *sis)
 {
 	struct snd_ac97_bus *bus;
 	struct snd_ac97_template ac97;
@@ -1064,12 +1052,9 @@ static int sis_chip_free(struct sis7019 *sis)
 	if (sis->irq >= 0)
 		free_irq(sis->irq, sis);
 
-	if (sis->ioaddr)
-		iounmap(sis->ioaddr);
-
+	iounmap(sis->ioaddr);
 	pci_release_regions(sis->pci);
 	pci_disable_device(sis->pci);
-
 	sis_free_suspend(sis);
 	return 0;
 }
@@ -1171,7 +1156,7 @@ static int sis_chip_init(struct sis7019 *sis)
 	outl(SIS_DMA_CSR_PCI_SETTINGS, io + SIS_DMA_CSR);
 
 	/* Reset the synchronization groups for all of the channels
-	 * to be asyncronous. If we start doing SPDIF or 5.1 sound, etc.
+	 * to be asynchronous. If we start doing SPDIF or 5.1 sound, etc.
 	 * we'll need to change how we handle these. Until then, we just
 	 * assign sub-mixer 0 to all playback channels, and avoid any
 	 * attenuation on the audio.
@@ -1208,16 +1193,15 @@ static int sis_chip_init(struct sis7019 *sis)
 	return 0;
 }
 
-#ifdef CONFIG_PM
-static int sis_suspend(struct pci_dev *pci, pm_message_t state)
+#ifdef CONFIG_PM_SLEEP
+static int sis_suspend(struct device *dev)
 {
-	struct snd_card *card = pci_get_drvdata(pci);
+	struct snd_card *card = dev_get_drvdata(dev);
 	struct sis7019 *sis = card->private_data;
 	void __iomem *ioaddr = sis->ioaddr;
 	int i;
 
 	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
-	snd_pcm_suspend_all(sis->pcm);
 	if (sis->codecs_present & SIS_PRIMARY_CODEC_PRESENT)
 		snd_ac97_suspend(sis->ac97[0]);
 	if (sis->codecs_present & SIS_SECONDARY_CODEC_PRESENT)
@@ -1239,26 +1223,16 @@ static int sis_suspend(struct pci_dev *pci, pm_message_t state)
 		ioaddr += 4096;
 	}
 
-	pci_disable_device(pci);
-	pci_save_state(pci);
-	pci_set_power_state(pci, pci_choose_state(pci, state));
 	return 0;
 }
 
-static int sis_resume(struct pci_dev *pci)
+static int sis_resume(struct device *dev)
 {
-	struct snd_card *card = pci_get_drvdata(pci);
+	struct pci_dev *pci = to_pci_dev(dev);
+	struct snd_card *card = dev_get_drvdata(dev);
 	struct sis7019 *sis = card->private_data;
 	void __iomem *ioaddr = sis->ioaddr;
 	int i;
-
-	pci_set_power_state(pci, PCI_D0);
-	pci_restore_state(pci);
-
-	if (pci_enable_device(pci) < 0) {
-		dev_err(&pci->dev, "unable to re-enable device\n");
-		goto error;
-	}
 
 	if (sis_chip_init(sis)) {
 		dev_err(&pci->dev, "unable to re-init controller\n");
@@ -1282,7 +1256,6 @@ static int sis_resume(struct pci_dev *pci)
 	memset(sis->suspend_state[0], 0, 4096);
 
 	sis->irq = pci->irq;
-	pci_set_master(pci);
 
 	if (sis->codecs_present & SIS_PRIMARY_CODEC_PRESENT)
 		snd_ac97_resume(sis->ac97[0]);
@@ -1298,7 +1271,12 @@ error:
 	snd_card_disconnect(card);
 	return -EIO;
 }
-#endif /* CONFIG_PM */
+
+static SIMPLE_DEV_PM_OPS(sis_pm, sis_suspend, sis_resume);
+#define SIS_PM_OPS	&sis_pm
+#else
+#define SIS_PM_OPS	NULL
+#endif /* CONFIG_PM_SLEEP */
 
 static int sis_alloc_suspend(struct sis7019 *sis)
 {
@@ -1319,8 +1297,8 @@ static int sis_alloc_suspend(struct sis7019 *sis)
 	return 0;
 }
 
-static int __devinit sis_chip_create(struct snd_card *card,
-					struct pci_dev *pci)
+static int sis_chip_create(struct snd_card *card,
+			   struct pci_dev *pci)
 {
 	struct sis7019 *sis = card->private_data;
 	struct voice *voice;
@@ -1334,7 +1312,8 @@ static int __devinit sis_chip_create(struct snd_card *card,
 	if (rc)
 		goto error_out;
 
-	if (pci_set_dma_mask(pci, DMA_BIT_MASK(30)) < 0) {
+	rc = dma_set_mask(&pci->dev, DMA_BIT_MASK(30));
+	if (rc < 0) {
 		dev_err(&pci->dev, "architecture does not support 30-bit PCI busmaster DMA");
 		goto error_out_enabled;
 	}
@@ -1370,8 +1349,9 @@ static int __devinit sis_chip_create(struct snd_card *card,
 	if (rc)
 		goto error_out_cleanup;
 
-	if (request_irq(pci->irq, sis_interrupt, IRQF_SHARED, KBUILD_MODNAME,
-			sis)) {
+	rc = request_irq(pci->irq, sis_interrupt, IRQF_SHARED, KBUILD_MODNAME,
+			 sis);
+	if (rc) {
 		dev_err(&pci->dev, "unable to allocate irq %d\n", sis->irq);
 		goto error_out_cleanup;
 	}
@@ -1395,8 +1375,6 @@ static int __devinit sis_chip_create(struct snd_card *card,
 	if (rc)
 		goto error_out_cleanup;
 
-	snd_card_set_dev(card, &pci->dev);
-
 	return 0;
 
 error_out_cleanup:
@@ -1409,8 +1387,8 @@ error_out:
 	return rc;
 }
 
-static int __devinit snd_sis7019_probe(struct pci_dev *pci,
-					const struct pci_device_id *pci_id)
+static int snd_sis7019_probe(struct pci_dev *pci,
+			     const struct pci_device_id *pci_id)
 {
 	struct snd_card *card;
 	struct sis7019 *sis;
@@ -1431,7 +1409,8 @@ static int __devinit snd_sis7019_probe(struct pci_dev *pci,
 	if (!codecs)
 		codecs = SIS_PRIMARY_CODEC_PRESENT;
 
-	rc = snd_card_create(index, id, THIS_MODULE, sizeof(*sis), &card);
+	rc = snd_card_new(&pci->dev, index, id, THIS_MODULE,
+			  sizeof(*sis), &card);
 	if (rc < 0)
 		goto error_out;
 
@@ -1470,33 +1449,19 @@ error_out:
 	return rc;
 }
 
-static void __devexit snd_sis7019_remove(struct pci_dev *pci)
+static void snd_sis7019_remove(struct pci_dev *pci)
 {
 	snd_card_free(pci_get_drvdata(pci));
-	pci_set_drvdata(pci, NULL);
 }
 
 static struct pci_driver sis7019_driver = {
 	.name = KBUILD_MODNAME,
 	.id_table = snd_sis7019_ids,
 	.probe = snd_sis7019_probe,
-	.remove = __devexit_p(snd_sis7019_remove),
-
-#ifdef CONFIG_PM
-	.suspend = sis_suspend,
-	.resume = sis_resume,
-#endif
+	.remove = snd_sis7019_remove,
+	.driver = {
+		.pm = SIS_PM_OPS,
+	},
 };
 
-static int __init sis7019_init(void)
-{
-	return pci_register_driver(&sis7019_driver);
-}
-
-static void __exit sis7019_exit(void)
-{
-	pci_unregister_driver(&sis7019_driver);
-}
-
-module_init(sis7019_init);
-module_exit(sis7019_exit);
+module_pci_driver(sis7019_driver);

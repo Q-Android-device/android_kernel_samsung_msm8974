@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Force feedback support for hid-compliant for some of the devices from
  * Logitech, namely:
@@ -9,19 +10,6 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  *
  * Should you need to contact me, the author, you can do so by
  * e-mail - mail your message to <johann.deneux@it.uu.se>
@@ -30,10 +18,8 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/input.h>
-#include <linux/usb.h>
 #include <linux/hid.h>
 
-#include "usbhid/usbhid.h"
 #include "hid-lg.h"
 
 struct dev_type {
@@ -89,7 +75,7 @@ static int hid_lgff_play(struct input_dev *dev, void *data, struct ff_effect *ef
 		report->field[0]->value[2] = x;
 		report->field[0]->value[3] = y;
 		dbg_hid("(x, y)=(%04x, %04x)\n", x, y);
-		usbhid_submit_report(hid, report, USB_DIR_OUT);
+		hid_hw_request(hid, report, HID_REQ_SET_REPORT);
 		break;
 
 	case FF_RUMBLE:
@@ -104,7 +90,7 @@ static int hid_lgff_play(struct input_dev *dev, void *data, struct ff_effect *ef
 		report->field[0]->value[2] = left;
 		report->field[0]->value[3] = right;
 		dbg_hid("(left, right)=(%04x, %04x)\n", left, right);
-		usbhid_submit_report(hid, report, USB_DIR_OUT);
+		hid_hw_request(hid, report, HID_REQ_SET_REPORT);
 		break;
 	}
 	return 0;
@@ -124,7 +110,7 @@ static void hid_lgff_set_autocenter(struct input_dev *dev, u16 magnitude)
 	*value++ = 0x80;
 	*value++ = 0x00;
 	*value = 0x00;
-	usbhid_submit_report(hid, report, USB_DIR_OUT);
+	hid_hw_request(hid, report, HID_REQ_SET_REPORT);
 }
 
 int lgff_init(struct hid_device* hid)

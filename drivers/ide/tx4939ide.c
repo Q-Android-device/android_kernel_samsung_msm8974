@@ -156,7 +156,6 @@ static u16 tx4939ide_check_error_ints(ide_hwif_t *hwif)
 		u16 sysctl = tx4939ide_readw(base, TX4939IDE_Sys_Ctl);
 
 		tx4939ide_writew(sysctl | 0x4000, base, TX4939IDE_Sys_Ctl);
-		mmiowb();
 		/* wait 12GBUSCLK (typ. 60ns @ GBUS200MHz, max 270ns) */
 		ndelay(270);
 		tx4939ide_writew(sysctl, base, TX4939IDE_Sys_Ctl);
@@ -396,7 +395,6 @@ static void tx4939ide_init_hwif(ide_hwif_t *hwif)
 
 	/* Soft Reset */
 	tx4939ide_writew(0x8000, base, TX4939IDE_Sys_Ctl);
-	mmiowb();
 	/* at least 20 GBUSCLK (typ. 100ns @ GBUS200MHz, max 450ns) */
 	ndelay(450);
 	tx4939ide_writew(0x0000, base, TX4939IDE_Sys_Ctl);
@@ -522,7 +520,7 @@ static const struct ide_dma_ops tx4939ide_dma_ops = {
 	.dma_sff_read_status	= tx4939ide_dma_sff_read_status,
 };
 
-static const struct ide_port_info tx4939ide_port_info __initdata = {
+static const struct ide_port_info tx4939ide_port_info __initconst = {
 	.init_hwif		= tx4939ide_init_hwif,
 	.init_dma		= tx4939ide_init_dma,
 	.port_ops		= &tx4939ide_port_ops,
@@ -618,24 +616,12 @@ static int tx4939ide_resume(struct platform_device *dev)
 static struct platform_driver tx4939ide_driver = {
 	.driver = {
 		.name = MODNAME,
-		.owner = THIS_MODULE,
 	},
 	.remove = __exit_p(tx4939ide_remove),
 	.resume = tx4939ide_resume,
 };
 
-static int __init tx4939ide_init(void)
-{
-	return platform_driver_probe(&tx4939ide_driver, tx4939ide_probe);
-}
-
-static void __exit tx4939ide_exit(void)
-{
-	platform_driver_unregister(&tx4939ide_driver);
-}
-
-module_init(tx4939ide_init);
-module_exit(tx4939ide_exit);
+module_platform_driver_probe(tx4939ide_driver, tx4939ide_probe);
 
 MODULE_DESCRIPTION("TX4939 internal IDE driver");
 MODULE_LICENSE("GPL");

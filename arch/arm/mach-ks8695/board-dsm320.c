@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * arch/arm/mach-ks8695/board-dsm320.c
  *
@@ -5,10 +6,6 @@
  *
  * Copyright 2008 Simtec Electronics
  *		  Daniel Silverstone <dsilvers@simtec.co.uk>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/gpio.h>
 #include <linux/kernel.h>
@@ -28,7 +25,7 @@
 #include <asm/mach/map.h>
 #include <asm/mach/irq.h>
 
-#include <mach/devices.h>
+#include "devices.h"
 #include <mach/gpio-ks8695.h>
 
 #include "generic.h"
@@ -125,6 +122,6 @@ MACHINE_START(DSM320, "D-Link DSM-320 Wireless Media Player")
 	.map_io		= ks8695_map_io,
 	.init_irq	= ks8695_init_irq,
 	.init_machine	= dsm320_init,
-	.timer		= &ks8695_timer,
+	.init_time	= ks8695_timer_init,
 	.restart	= ks8695_restart,
 MACHINE_END

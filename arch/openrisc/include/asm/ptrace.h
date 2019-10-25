@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * OpenRISC Linux
  *
@@ -9,33 +10,13 @@
  * Copyright (C) 2003 Matjaz Breskvar <phoenix@bsemi.com>
  * Copyright (C) 2010-2011 Jonas Bonn <jonas@southpole.se>
  * et al.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
-
 #ifndef __ASM_OPENRISC_PTRACE_H
 #define __ASM_OPENRISC_PTRACE_H
 
+
 #include <asm/spr_defs.h>
-
-#ifndef __ASSEMBLY__
-/*
- * This is the layout of the regset returned by the GETREGSET ptrace call
- */
-struct user_regs_struct {
-	/* GPR R0-R31... */
-	unsigned long gpr[32];
-	unsigned long pc;
-	unsigned long sr;
-	unsigned long pad1;
-	unsigned long pad2;
-};
-#endif
-
-#ifdef __KERNEL__
+#include <uapi/asm/ptrace.h>
 
 /*
  * Make kernel PTrace/register structures opaque to userspace... userspace can
@@ -135,7 +116,5 @@ static inline long regs_return_value(struct pt_regs *regs)
 #define PT_PC	      128
 #define PT_ORIG_GPR11 132
 #define PT_SYSCALLNO  136
-
-#endif /* __KERNEL__ */
 
 #endif /* __ASM_OPENRISC_PTRACE_H */

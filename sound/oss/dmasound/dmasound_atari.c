@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/sound/oss/dmasound/dmasound_atari.c
  *
@@ -22,7 +23,7 @@
 #include <linux/spinlock.h>
 #include <linux/interrupt.h>
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/atariints.h>
 #include <asm/atari_stram.h>
 
@@ -851,7 +852,7 @@ static int __init AtaIrqInit(void)
 	st_mfp.tim_dt_a = 1;	/* Cause interrupt after first event. */
 	st_mfp.tim_ct_a = 8;	/* Turn on event counting. */
 	/* Register interrupt handler. */
-	if (request_irq(IRQ_MFP_TIMA, AtaInterrupt, IRQ_TYPE_SLOW, "DMA sound",
+	if (request_irq(IRQ_MFP_TIMA, AtaInterrupt, 0, "DMA sound",
 			AtaInterrupt))
 		return 0;
 	st_mfp.int_en_a |= 0x20;	/* Turn interrupt on. */

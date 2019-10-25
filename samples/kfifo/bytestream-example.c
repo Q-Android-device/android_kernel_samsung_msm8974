@@ -1,10 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Sample kfifo byte stream implementation
  *
  * Copyright (C) 2010 Stefani Seibold <stefani@seibold.net>
- *
- * Released under the GPL version 2 only.
- *
  */
 
 #include <linux/init.h>
@@ -64,7 +62,7 @@ static int __init testfunc(void)
 
 	/* put values into the fifo */
 	for (i = 0; i != 10; i++)
-		kfifo_put(&test, &i);
+		kfifo_put(&test, i);
 
 	/* show the number of used elements */
 	printk(KERN_INFO "fifo len: %u\n", kfifo_len(&test));
@@ -85,7 +83,7 @@ static int __init testfunc(void)
 	kfifo_skip(&test);
 
 	/* put values into the fifo until is full */
-	for (i = 20; kfifo_put(&test, &i); i++)
+	for (i = 20; kfifo_put(&test, i); i++)
 		;
 
 	printk(KERN_INFO "queue len: %u\n", kfifo_len(&test));

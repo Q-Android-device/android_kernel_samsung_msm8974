@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * arch/arm/kernel/crunch.c
  * Cirrus MaverickCrunch context switching and handling
  *
  * Copyright (C) 2006 Lennert Buytenhek <buytenh@wantstofly.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -79,12 +76,10 @@ static struct notifier_block crunch_notifier_block = {
 	.notifier_call	= crunch_do,
 };
 
-static int __init crunch_init(void)
+int __init crunch_init(void)
 {
 	thread_register_notifier(&crunch_notifier_block);
 	elf_hwcap |= HWCAP_CRUNCH;
 
 	return 0;
 }
-
-late_initcall(crunch_init);

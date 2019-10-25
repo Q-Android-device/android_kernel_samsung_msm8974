@@ -1,27 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2002 Pavel Machek <pavel@ucw.cz>
  * Copyright (C) 2002-2005 by David Brownell
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 // #define	DEBUG			// error path messages, extra info
 // #define	VERBOSE			// more; success messages
 
 #include <linux/module.h>
-#include <linux/init.h>
 #include <linux/netdevice.h>
 #include <linux/ethtool.h>
 #include <linux/workqueue.h>
@@ -76,10 +62,10 @@ done:
 		fcs = crc32_le(~0, skb->data, skb->len);
 		fcs = ~fcs;
 
-		*skb_put (skb, 1) = fcs       & 0xff;
-		*skb_put (skb, 1) = (fcs>> 8) & 0xff;
-		*skb_put (skb, 1) = (fcs>>16) & 0xff;
-		*skb_put (skb, 1) = (fcs>>24) & 0xff;
+		skb_put_u8(skb, fcs & 0xff);
+		skb_put_u8(skb, (fcs >> 8) & 0xff);
+		skb_put_u8(skb, (fcs >> 16) & 0xff);
+		skb_put_u8(skb, (fcs >> 24) & 0xff);
 	}
 	return skb;
 }
@@ -377,6 +363,7 @@ static struct usb_driver zaurus_driver = {
 	.disconnect =	usbnet_disconnect,
 	.suspend =	usbnet_suspend,
 	.resume =	usbnet_resume,
+	.disable_hub_initiated_lpm = 1,
 };
 
 module_usb_driver(zaurus_driver);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Common data handling layer for bas_gigaset
  *
@@ -5,10 +6,6 @@
  *                       Hansjoerg Lipp <hjlipp@web.de>.
  *
  * =====================================================================
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License as
- *	published by the Free Software Foundation; either version 2 of
- *	the License, or (at your option) any later version.
  * =====================================================================
  */
 
@@ -56,7 +53,7 @@ static inline int isowbuf_freebytes(struct isowbuf_t *iwb)
 
 /* start writing
  * acquire the write semaphore
- * return true if acquired, false if busy
+ * return 0 if acquired, <0 if busy
  */
 static inline int isowbuf_startwrite(struct isowbuf_t *iwb)
 {
@@ -64,12 +61,12 @@ static inline int isowbuf_startwrite(struct isowbuf_t *iwb)
 		atomic_inc(&iwb->writesem);
 		gig_dbg(DEBUG_ISO, "%s: couldn't acquire iso write semaphore",
 			__func__);
-		return 0;
+		return -EBUSY;
 	}
 	gig_dbg(DEBUG_ISO,
 		"%s: acquired iso write semaphore, data[write]=%02x, nbits=%d",
 		__func__, iwb->data[iwb->write], iwb->wbits);
-	return 1;
+	return 0;
 }
 
 /* finish writing
@@ -158,7 +155,7 @@ int gigaset_isowbuf_getbytes(struct isowbuf_t *iwb, int size)
 		/* no wraparound in valid data */
 		if (limit >= write) {
 			/* append idle frame */
-			if (!isowbuf_startwrite(iwb))
+			if (isowbuf_startwrite(iwb) < 0)
 				return -EBUSY;
 			/* write position could have changed */
 			write = iwb->write;
@@ -403,7 +400,7 @@ static inline int hdlc_buildframe(struct isowbuf_t *iwb,
 	unsigned char c;
 
 	if (isowbuf_freebytes(iwb) < count + count / 5 + 6 ||
-	    !isowbuf_startwrite(iwb)) {
+	    isowbuf_startwrite(iwb) < 0) {
 		gig_dbg(DEBUG_ISO, "%s: %d bytes free -> -EAGAIN",
 			__func__, isowbuf_freebytes(iwb));
 		return -EAGAIN;
@@ -457,7 +454,7 @@ static inline int trans_buildframe(struct isowbuf_t *iwb,
 		return iwb->write;
 
 	if (isowbuf_freebytes(iwb) < count ||
-	    !isowbuf_startwrite(iwb)) {
+	    isowbuf_startwrite(iwb) < 0) {
 		gig_dbg(DEBUG_ISO, "can't put %d bytes", count);
 		return -EAGAIN;
 	}
@@ -511,7 +508,7 @@ static inline void hdlc_putbyte(unsigned char c, struct bc_state *bcs)
 		bcs->rx_skb = NULL;
 		return;
 	}
-	*__skb_put(bcs->rx_skb, 1) = c;
+	__skb_put_u8(bcs->rx_skb, c);
 }
 
 /* hdlc_flush
@@ -906,7 +903,7 @@ static void cmd_loop(unsigned char *src, int numbytes, struct inbuf_t *inbuf)
 				cs->respdata[0] = 0;
 				break;
 			}
-			/* --v-- fall through --v-- */
+			/* fall through */
 		case '\r':
 			/* end of message line, pass to response handler */
 			if (cbytes >= MAX_RESP_SIZE) {

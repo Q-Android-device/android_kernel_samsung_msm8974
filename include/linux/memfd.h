@@ -1,8 +1,16 @@
-#ifndef _LINUX_MEMFD_H
-#define _LINUX_MEMFD_H
+/* SPDX-License-Identifier: GPL-2.0 */
+#ifndef __LINUX_MEMFD_H
+#define __LINUX_MEMFD_H
 
-/* flags for memfd_create(2) (unsigned int) */
-#define MFD_CLOEXEC		0x0001U
-#define MFD_ALLOW_SEALING	0x0002U
+#include <linux/file.h>
 
-#endif /* _LINUX_MEMFD_H */
+#ifdef CONFIG_MEMFD_CREATE
+extern long memfd_fcntl(struct file *file, unsigned int cmd, unsigned long arg);
+#else
+static inline long memfd_fcntl(struct file *f, unsigned int c, unsigned long a)
+{
+	return -EINVAL;
+}
+#endif
+
+#endif /* __LINUX_MEMFD_H */

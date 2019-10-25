@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  Port on Texas Instruments TMS320C6x architecture
  *
@@ -5,10 +6,6 @@
  *  Author: Aurelien Jacquiot (aurelien.jacquiot@jaluna.com)
  *
  *  Large parts taken directly from powerpc.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
  */
 #ifndef _ASM_C6X_IRQ_H
 #define _ASM_C6X_IRQ_H
@@ -33,8 +30,6 @@
  * can each route a single SoC interrupt directly.
  */
 #define NR_PRIORITY_IRQS 16
-
-#define NR_IRQS_LEGACY	NR_PRIORITY_IRQS
 
 /* Total number of virq in the platform */
 #define NR_IRQS		256
